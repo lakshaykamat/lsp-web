@@ -7,6 +7,10 @@ const FORWARD_HEADERS = [
   "x-client-request-id",
   "user-agent",
   "accept",
+  "x-forwarded-for",
+  "x-real-ip",
+  "x-forwarded-proto",
+  "x-forwarded-host",
 ] as const
 
 export function apiBase(): string | null {

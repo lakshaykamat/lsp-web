@@ -7,6 +7,7 @@ import { ArrowRight, MagnifyingGlass, WarningCircle } from "@phosphor-icons/reac
 
 import { SiteHeader } from "@/components/lsp/site-header"
 import { Button } from "@/components/ui/button"
+import { getUserId } from "@/lib/identity"
 import { cn } from "@/lib/utils"
 import type {
   TransformError,
@@ -63,9 +64,14 @@ export default function HistoryPage() {
 
   useEffect(() => {
     const ctrl = new AbortController()
+    const initialUserId = getUserId()
+    if (initialUserId) setUserId(initialUserId)
     ;(async () => {
       try {
-        const res = await fetch(`/api/usage?limit=20`, {
+        const params = new URLSearchParams()
+        params.set("limit", "20")
+        if (initialUserId) params.set("user_id", initialUserId)
+        const res = await fetch(`/api/usage?${params}`, {
           cache: "no-store",
           signal: ctrl.signal,
         })
