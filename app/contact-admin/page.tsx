@@ -23,9 +23,7 @@ export default function ContactAdminPage() {
         </h1>
 
         <p className="text-muted-foreground mt-3 text-sm leading-relaxed">
-          The LaTeX Style Processor is offline for maintenance. All pages and API
-          endpoints are paused. Please contact the administrator for access or an
-          estimated time to restore.
+          Offline for maintenance. Contact the admin for access.
         </p>
 
         <div className="border-border/60 bg-muted/30 mt-6 rounded-md border p-4">
@@ -33,16 +31,13 @@ export default function ContactAdminPage() {
             Contact
           </div>
           <Link
-            href="mailto:admin@example.com"
+            href="mailto:lakshaykamat.dev@gmail.com"
             className="text-foreground hover:text-primary mt-1 inline-block font-mono text-sm"
           >
-            admin@example.com
+            lakshaykamat.dev@gmail.com
           </Link>
         </div>
 
-        <p className="text-muted-foreground/80 mt-6 font-mono text-[10px] tracking-tight">
-          Status: 503 · IS_DISABLED=true
-        </p>
       </div>
     </main>
   )
