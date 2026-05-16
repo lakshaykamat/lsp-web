@@ -7,28 +7,22 @@
 
 ## Table of contents
 
-- [LSP Transform API — Frontend Integration Guide](#lsp-transform-api--frontend-integration-guide)
-  - [Table of contents](#table-of-contents)
-  - [1. Overview](#1-overview)
-  - [2. Base URL, content type, conventions](#2-base-url-content-type-conventions)
-  - [3. Authentication \& rate limiting](#3-authentication--rate-limiting)
-  - [4. Endpoints](#4-endpoints)
-    - [4.1 `GET /healthz`](#41-get-healthz)
-    - [4.2 `GET /version`](#42-get-version)
-    - [4.3 `GET /styles`](#43-get-styles)
-    - [4.4 `POST /transform`](#44-post-transform)
-    - [4.5 `GET /usage`](#45-get-usage)
-    - [4.6 `GET /usage/{request_id}`](#46-get-usagerequest_id)
-    - [4.7 `GET /usage/{request_id}/input.tex`](#47-get-usagerequest_idinputtex)
-    - [4.8 `GET /usage/{request_id}/output.tex`](#48-get-usagerequest_idoutputtex)
-    - [4.9 `GET /usage/{request_id}/log.txt`](#49-get-usagerequest_idlogtxt)
-  - [5. Error model](#5-error-model)
-  - [6. Identifying users](#6-identifying-users)
-    - [What the server records per `/transform`](#what-the-server-records-per-transform)
-    - [Picking `X-User-ID`](#picking-x-user-id)
-    - [Picking `X-Session-ID`](#picking-x-session-id)
-    - [Picking `X-Client-Request-ID`](#picking-x-client-request-id)
-  - [7. Quick reference](#7-quick-reference)
+1. [Overview](#1-overview)
+2. [Base URL, content type, conventions](#2-base-url-content-type-conventions)
+3. [Authentication & rate limiting](#3-authentication--rate-limiting)
+4. [Endpoints](#4-endpoints)
+   - [GET /healthz](#41-get-healthz)
+   - [GET /version](#42-get-version)
+   - [GET /styles](#43-get-styles)
+   - [POST /transform](#44-post-transform)
+   - [GET /usage](#45-get-usage)
+   - [GET /usage/{request_id}](#46-get-usagerequest_id)
+   - [GET /usage/{request_id}/input.tex](#47-get-usagerequest_idinputtex)
+   - [GET /usage/{request_id}/output.tex](#48-get-usagerequest_idoutputtex)
+   - [GET /usage/{request_id}/log.txt](#49-get-usagerequest_idlogtxt)
+5. [Error model](#5-error-model)
+6. [Identifying users](#6-identifying-users)
+7. [Quick reference](#7-quick-reference)
 
 ---
 
@@ -451,7 +445,7 @@ We build on \del{\cite}\ins{\citep}{smith2020}. See \del{Fig.}\ins{Figure} 1.
 
 ### 4.5 `GET /usage`
 
-Read the audit history of past `/transform` runs. Returns a sanitised projection — **no IPs, geo, or content hashes**.
+Read the audit history of past `/transform` runs. Returns a sanitised projection — includes claimed identity, server-derived `fingerprint`, IP + geo, user-agent, request shape, pipeline counters, token/cost telemetry, and GridFS artifact pointers. Only the raw content SHA stays server-side.
 
 All filters are optional. Call shapes:
 
@@ -460,19 +454,21 @@ All filters are optional. Call shapes:
 | List all runs (most recent first) | *(none)*                                    |
 | One user's history                | `?user_id=user_2fK91ABc`                    |
 | One session's history             | `?session_id=sess_42`                       |
-| Both filters (intersection)       | `?user_id=user_2fK91ABc&session_id=sess_42` |
+| One fingerprint's history         | `?fingerprint=9f86d081...`                  |
+| Combine filters (intersection)    | `?user_id=user_2fK91ABc&session_id=sess_42` |
 | Page through results              | append `&before=<ts_utc-from-prev-page>`    |
 
 **Query parameters**
 
-| Name         | Type    | Required | Notes                                                                                |
-| ------------ | ------- | -------- | ------------------------------------------------------------------------------------ |
-| `user_id`    | string  | no       | Match `X-User-ID` from the original transform. ≤128 chars.                           |
-| `session_id` | string  | no       | Match `X-Session-ID` from the original transform. ≤128 chars.                        |
-| `limit`      | integer | no       | 1..100, default **20**.                                                              |
-| `before`     | string  | no       | ISO-8601 timestamp. Returns runs strictly older than this — for paging.              |
+| Name          | Type    | Required | Notes                                                                                |
+| ------------- | ------- | -------- | ------------------------------------------------------------------------------------ |
+| `user_id`     | string  | no       | Match `X-User-ID` from the original transform. ≤128 chars.                           |
+| `session_id`  | string  | no       | Match `X-Session-ID` from the original transform. ≤128 chars.                        |
+| `fingerprint` | string  | no       | Match the server-derived `fingerprint` hash (§6). ≤128 chars. Useful for grouping CLI runs that have no `user_id`. |
+| `limit`       | integer | no       | 1..100, default **20**.                                                              |
+| `before`      | string  | no       | ISO-8601 timestamp. Returns runs strictly older than this — for paging.              |
 
-When both `user_id` and `session_id` are present, results match **both** (intersection).
+When multiple filters are present, results match **all** of them (intersection).
 
 **Example — fetch all (default limit)**
 
@@ -505,6 +501,7 @@ curl "https://api.lsp.example.com/usage?user_id=user_2fK91ABc&limit=50&before=20
       "user_id": "user_2fK91ABc",
       "session_id": "sess_42",
       "client_request_id": "6f2c1f4e-9a55-4f7b-8a6d-2b1f5b9b3f2d",
+      "fingerprint": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
       "ip": "203.0.113.7",
       "country": "IN",
       "region": "Maharashtra",
@@ -571,6 +568,7 @@ curl "https://api.lsp.example.com/usage?user_id=user_2fK91ABc&limit=50&before=20
       "user_id": "user_2fK91ABc",
       "session_id": "sess_42",
       "client_request_id": null,
+      "fingerprint": "44b2f4ee6f5d2e8c39a54a8f6b1d7c2e9a8b3c4d5e6f7a8b9c0d1e2f3a4b5c6d",
       "ip": null,
       "country": null,
       "region": null,
@@ -620,6 +618,7 @@ curl "https://api.lsp.example.com/usage?user_id=user_2fK91ABc&limit=50&before=20
 | `items[].user_id`      | string \| null      | Echo of the `X-User-ID` header sent on the original call. For CLI runs, taken from the `LSP_USER_ID` env var. |
 | `items[].session_id`   | string \| null      | Echo of `X-Session-ID`. For CLI runs, taken from `LSP_SESSION_ID`.                     |
 | `items[].client_request_id` | string \| null | Echo of `X-Client-Request-ID`. Always `null` for CLI runs.                              |
+| `items[].fingerprint`  | string \| null      | SHA-256 over `user_id + "\|" + user_agent`. Stable per (user-id, browser) pair; useful for grouping CLI runs that have no `user_id`. See §6. |
 | `items[].ip`           | string \| null      | Observed client IP (uvicorn proxy-headers settings determine whether this is the real IP or the reverse-proxy's). `null` for CLI runs. |
 | `items[].country` / `region` / `city` | string \| null | GeoIP lookup of `ip`. Coarse — country is reliable, city is best-effort. `null` for CLI runs. |
 | `items[].user_agent`   | string \| null      | Verbatim `User-Agent` header. `null` for CLI runs.                                     |
@@ -691,6 +690,7 @@ curl https://api.lsp.example.com/usage/5f3a9e1b-7d2c-4a18-9f4b-c1e2d3a4b5c6
   "user_id": "user_2fK91ABc",
   "session_id": "sess_42",
   "client_request_id": "6f2c1f4e-9a55-4f7b-8a6d-2b1f5b9b3f2d",
+  "fingerprint": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
   "ip": "203.0.113.7",
   "country": "IN",
   "region": "Maharashtra",
@@ -900,6 +900,7 @@ The API does not authenticate callers but **does record who ran each transform**
 | `user_id`                                   | `X-User-ID` header           | Group requests by end user                       |
 | `session_id`                                | `X-Session-ID` header        | Group requests within a single session           |
 | `client_request_id`                         | `X-Client-Request-ID` header | Correlate one client action with the server log  |
+| `fingerprint`                               | server-derived (see below)   | Weak correlator when `user_id` is missing        |
 | `request_id`                                | server-generated             | Canonical id for this request                    |
 | `style`                                     | request body                 | Which style was requested                        |
 | `content_size`                              | derived                      | Bytes of input LaTeX                             |
@@ -908,7 +909,17 @@ The API does not authenticate callers but **does record who ran each transform**
 | `ip`, `country`, `region`, `city`           | observed + geo lookup        | Coarse origin for support and abuse triage       |
 | `timestamp`                                 | server clock                 | When the request was processed                   |
 
-`/usage` returns most of the audit record — claimed identity, IP + geo, user-agent, request shape, pipeline counters, token/cost telemetry, and the GridFS artifact pointers + SHA-256 hashes. Only the server-side `fingerprint`, the request-content hash, and a couple of routing fields stay private. Because the API has **no auth**, anyone who knows a `user_id` can read these — see §3.
+`/usage` returns most of the audit record — claimed identity, server-derived `fingerprint`, IP + geo, user-agent, request shape, pipeline counters, token/cost telemetry, and the GridFS artifact pointers + SHA-256 hashes. Only the request-content hash and a couple of routing fields stay private. Because the API has **no auth**, anyone who knows a `user_id` can read these — see §3.
+
+### `fingerprint`
+
+A SHA-256 hash the server computes per request:
+
+```
+fingerprint = sha256(f"{user_id or ''}|{user_agent or ''}")
+```
+
+It's a weak correlator — changes when the user switches browsers or `user_id` is wiped, and matches across any two requests with the same `user_id` + `user-agent`. Useful for grouping CLI runs (no `user_id`) or older browsers without `localStorage`. Filter via `GET /usage?fingerprint=<hash>`.
 
 ### Picking `X-User-ID`
 
@@ -937,9 +948,10 @@ A per-call opaque id, typically `crypto.randomUUID()` at the call site. Echoed i
 | Build / runtime   | `GET /version`                      | Models, limits, auth posture — for "About" panels    |
 | Style catalogue   | `GET /styles`                       | Always fetch, never hardcode                         |
 | Run a transform   | `POST /transform`                   | JSON by default; `Accept: text/plain` or `?format=tex` returns a raw `.tex` body. Send `X-User-ID` for tracking. Pass `filename` to preserve the original basename in history. |
-| Usage history     | `GET /usage`                        | Filterless = all runs; filter by `user_id` and/or `session_id`; page via `before` |
+| Usage history     | `GET /usage`                        | Filterless = all runs; filter by `user_id`, `session_id`, and/or `fingerprint`; page via `before` |
 | Single run lookup | `GET /usage/{request_id}`           | Sanitised summary of one past run                    |
 | Re-download input | `GET /usage/{request_id}/input.tex` | Stream the original `.tex` from GridFS               |
 | Re-download output| `GET /usage/{request_id}/output.tex`| Stream the transformed `.tex` from GridFS            |
 | Re-download log   | `GET /usage/{request_id}/log.txt`   | Stream the captured pipeline run log                 |
 | OpenAPI / Swagger | `GET /docs`                         | Live schema — keep this open while integrating       |
+

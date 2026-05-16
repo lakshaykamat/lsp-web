@@ -106,7 +106,7 @@ function DetailView({ item }: { item: UsageItem }) {
       <header className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <h1
-            className="text-foreground truncate text-lg font-medium tracking-tight"
+            className="text-foreground min-w-0 max-w-full truncate text-lg font-medium tracking-tight"
             title={item.filename ?? undefined}
           >
             {item.filename ?? "Untitled"}
@@ -218,6 +218,9 @@ function DetailView({ item }: { item: UsageItem }) {
         <Row label="client_request_id">
           <Mono>{item.client_request_id ?? "—"}</Mono>
         </Row>
+        <Row label="fingerprint">
+          <Mono truncate>{item.fingerprint ?? "—"}</Mono>
+        </Row>
         <Row label="IP">
           <Mono>{item.ip ?? "—"}</Mono>
         </Row>
@@ -226,7 +229,7 @@ function DetailView({ item }: { item: UsageItem }) {
             "—"}
         </Row>
         <Row label="User-Agent">
-          <span className="text-muted-foreground truncate font-mono text-[11px]">
+          <span className="text-muted-foreground block font-mono text-[11px] break-all">
             {item.user_agent ?? "—"}
           </span>
         </Row>
@@ -308,7 +311,9 @@ function ArtifactLinks({
           {it.enabled ? (
             <a
               href={it.href}
-              className="text-foreground hover:underline font-mono text-[11px] underline-offset-4"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-mono text-[11px] underline underline-offset-4 decoration-blue-600/40 dark:decoration-blue-400/40 hover:decoration-blue-600 dark:hover:decoration-blue-400 transition"
             >
               {it.label}
             </a>
@@ -366,7 +371,7 @@ function Mono({
     <span
       className={cn(
         "font-mono text-[11px]",
-        truncate && "block truncate",
+        truncate && "block min-w-0 max-w-full truncate",
       )}
     >
       {children}
