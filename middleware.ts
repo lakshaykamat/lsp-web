@@ -10,6 +10,10 @@ export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
   if (pathname.startsWith("/api/")) {
+    // Allow version probes so the contact-admin page can still show the build.
+    if (pathname === "/api/version") {
+      return NextResponse.next()
+    }
     return NextResponse.json(
       { error: "service_disabled", message: "This service is temporarily disabled. Please contact the administrator." },
       { status: 503 },

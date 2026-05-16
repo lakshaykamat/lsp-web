@@ -1,34 +1,76 @@
-import Link from "next/link"
+"use client"
 
-export const metadata = {
-  title: "Service Unavailable — LSP",
-  description: "This service is temporarily disabled. Please contact the administrator.",
-}
+import { useEffect, useState } from "react"
+import Link from "next/link"
 
 const ADMIN_EMAIL = "lakshaykamat.dev@gmail.com"
 
+type VersionInfo = {
+  version: string
+  git_sha: string | null
+}
+
 export default function ContactAdminPage() {
+  const [version, setVersion] = useState<VersionInfo | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch("/api/version")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: VersionInfo | null) => {
+        if (!cancelled && data) setVersion(data)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const versionLabel = version
+    ? `v${version.version}${version.git_sha ? ` (${version.git_sha.slice(0, 7)})` : ""}`
+    : "—"
+
   return (
-    <main className="bg-background text-foreground flex min-h-screen items-center justify-center px-6">
-      <div className="w-full max-w-sm">
-        <div className="bg-primary/10 text-primary inline-flex h-7 w-7 items-center justify-center rounded-md font-mono text-[11px] font-semibold tracking-tight">
-          LSP
+    <main className="bg-background text-foreground flex min-h-screen items-center justify-center px-6 py-16 font-mono">
+      <div className="w-full max-w-md text-[13px] leading-7">
+        <div className="text-muted-foreground">
+          <span className="text-primary">$</span> lsp status
         </div>
 
-        <h1 className="text-foreground mt-6 text-lg font-medium tracking-tight">
-          We&apos;ll be right back.
-        </h1>
-        <p className="text-muted-foreground mt-1.5 text-sm">
-          Offline for maintenance. Contact the admin for access.
-        </p>
+        <div className="mt-5 space-y-1">
+          <Row label="status" value="maintenance" valueClass="text-amber-600 dark:text-amber-400" />
+          <Row label="message" value="we’ll be right back" />
+          <Row label="version" value={versionLabel} />
+          <Row label="contact" value={ADMIN_EMAIL} />
+        </div>
 
         <Link
           href={`mailto:${ADMIN_EMAIL}`}
-          className="bg-primary text-primary-foreground hover:bg-primary/90 mt-6 inline-flex h-9 items-center justify-center rounded-md px-4 text-sm font-medium tracking-tight transition-colors"
+          className="text-foreground hover:text-primary mt-6 inline-block transition-colors"
         >
-          Email admin
+          <span className="text-muted-foreground">[ </span>
+          email admin
+          <span className="text-muted-foreground"> ]</span>
         </Link>
       </div>
     </main>
+  )
+}
+
+function Row({
+  label,
+  value,
+  valueClass,
+}: {
+  label: string
+  value: string
+  valueClass?: string
+}) {
+  return (
+    <div className="flex gap-3">
+      <span className="text-primary select-none">▸</span>
+      <span className="text-muted-foreground w-20 shrink-0">{label}</span>
+      <span className={valueClass ?? "text-foreground"}>{value}</span>
+    </div>
   )
 }
