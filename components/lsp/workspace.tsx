@@ -633,6 +633,7 @@ function OutputStep({
   const tokens = useMemo(() => parseDiff(data.content), [data.content])
   const edits = useMemo(() => countEdits(tokens), [tokens])
   const [showInline, setShowInline] = useState(true)
+  const autoDownloaded = useRef(false)
 
   function copy() {
     navigator.clipboard.writeText(data.content).catch(() => {})
@@ -648,6 +649,13 @@ function OutputStep({
     a.click()
     URL.revokeObjectURL(url)
   }
+
+  useEffect(() => {
+    if (autoDownloaded.current) return
+    autoDownloaded.current = true
+    download()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.meta.request_id])
 
   return (
     <div className="flex flex-col gap-4">
