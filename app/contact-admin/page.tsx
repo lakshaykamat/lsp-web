@@ -5,39 +5,29 @@ export const metadata = {
   description: "This service is temporarily disabled. Please contact the administrator.",
 }
 
+const ADMIN_EMAIL = "lakshaykamat.dev@gmail.com"
+
 export default function ContactAdminPage() {
   return (
-    <main className="bg-background text-foreground flex min-h-screen items-center justify-center px-6 py-16">
-      <div className="border-border/60 bg-card/40 w-full max-w-md rounded-xl border p-8 shadow-sm backdrop-blur-sm">
-        <div className="flex items-center gap-3">
-          <div className="bg-primary/10 text-primary flex h-8 w-8 items-center justify-center rounded-md font-mono text-[11px] font-semibold tracking-tight">
-            LSP
-          </div>
-          <span className="text-muted-foreground font-mono text-[10px] tracking-tight uppercase">
-            Service unavailable
-          </span>
+    <main className="bg-background text-foreground flex min-h-screen items-center justify-center px-6">
+      <div className="w-full max-w-sm">
+        <div className="bg-primary/10 text-primary inline-flex h-7 w-7 items-center justify-center rounded-md font-mono text-[11px] font-semibold tracking-tight">
+          LSP
         </div>
 
-        <h1 className="text-foreground mt-6 text-xl font-medium tracking-tight">
-          This service is temporarily disabled
+        <h1 className="text-foreground mt-6 text-lg font-medium tracking-tight">
+          We&apos;ll be right back.
         </h1>
-
-        <p className="text-muted-foreground mt-3 text-sm leading-relaxed">
+        <p className="text-muted-foreground mt-1.5 text-sm">
           Offline for maintenance. Contact the admin for access.
         </p>
 
-        <div className="border-border/60 bg-muted/30 mt-6 rounded-md border p-4">
-          <div className="text-muted-foreground font-mono text-[10px] tracking-tight uppercase">
-            Contact
-          </div>
-          <Link
-            href="mailto:lakshaykamat.dev@gmail.com"
-            className="text-foreground hover:text-primary mt-1 inline-block font-mono text-sm"
-          >
-            lakshaykamat.dev@gmail.com
-          </Link>
-        </div>
-
+        <Link
+          href={`mailto:${ADMIN_EMAIL}`}
+          className="bg-primary text-primary-foreground hover:bg-primary/90 mt-6 inline-flex h-9 items-center justify-center rounded-md px-4 text-sm font-medium tracking-tight transition-colors"
+        >
+          Email admin
+        </Link>
       </div>
     </main>
   )
