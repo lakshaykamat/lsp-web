@@ -66,8 +66,9 @@ export type UsageItem = {
   user_id: string | null
   session_id: string | null
   client_request_id: string | null
-  fingerprint: string | null
   ip: string | null
+  forwarded_for: string | null
+  real_ip: string | null
   country: string | null
   region: string | null
   city: string | null

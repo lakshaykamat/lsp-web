@@ -18,7 +18,6 @@ import type {
 export default function HistoryPage() {
   const [userId, setUserId] = useState("")
   const [sessionId, setSessionId] = useState("")
-  const [fingerprint, setFingerprint] = useState("")
   const [items, setItems] = useState<UsageItem[]>([])
   const [nextBefore, setNextBefore] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -34,7 +33,6 @@ export default function HistoryPage() {
       const params = new URLSearchParams()
       if (userId.trim()) params.set("user_id", userId.trim())
       if (sessionId.trim()) params.set("session_id", sessionId.trim())
-      if (fingerprint.trim()) params.set("fingerprint", fingerprint.trim())
       params.set("limit", "20")
       if (opts.before) params.set("before", opts.before)
 
@@ -61,7 +59,7 @@ export default function HistoryPage() {
         setLoadingMore(false)
       }
     },
-    [userId, sessionId, fingerprint],
+    [userId, sessionId],
   )
 
   useEffect(() => {
@@ -108,7 +106,6 @@ export default function HistoryPage() {
   function clearFilters() {
     setUserId("")
     setSessionId("")
-    setFingerprint("")
     setTimeout(() => void fetchPage({ append: false }), 0)
   }
 
@@ -144,14 +141,8 @@ export default function HistoryPage() {
             onChange={setSessionId}
             placeholder="sess_42"
           />
-          <FilterField
-            label="fingerprint"
-            value={fingerprint}
-            onChange={setFingerprint}
-            placeholder="9f86d081…"
-          />
           <div className="ml-auto flex items-center gap-2">
-            {(userId || sessionId || fingerprint) && (
+            {(userId || sessionId) && (
               <button
                 type="button"
                 onClick={clearFilters}

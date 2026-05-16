@@ -445,7 +445,7 @@ We build on \del{\cite}\ins{\citep}{smith2020}. See \del{Fig.}\ins{Figure} 1.
 
 ### 4.5 `GET /usage`
 
-Read the audit history of past `/transform` runs. Returns a sanitised projection — includes claimed identity, server-derived `fingerprint`, IP + geo, user-agent, request shape, pipeline counters, token/cost telemetry, and GridFS artifact pointers. Only the raw content SHA stays server-side.
+Read the audit history of past `/transform` runs. Returns a sanitised projection — claimed identity, resolved IP + raw forwarded headers + geo, user-agent, request shape, pipeline counters, token/cost telemetry, and GridFS artifact pointers. Only the raw content SHA stays server-side.
 
 All filters are optional. Call shapes:
 
@@ -454,7 +454,6 @@ All filters are optional. Call shapes:
 | List all runs (most recent first) | *(none)*                                    |
 | One user's history                | `?user_id=user_2fK91ABc`                    |
 | One session's history             | `?session_id=sess_42`                       |
-| One fingerprint's history         | `?fingerprint=9f86d081...`                  |
 | Combine filters (intersection)    | `?user_id=user_2fK91ABc&session_id=sess_42` |
 | Page through results              | append `&before=<ts_utc-from-prev-page>`    |
 
@@ -464,11 +463,10 @@ All filters are optional. Call shapes:
 | ------------- | ------- | -------- | ------------------------------------------------------------------------------------ |
 | `user_id`     | string  | no       | Match `X-User-ID` from the original transform. ≤128 chars.                           |
 | `session_id`  | string  | no       | Match `X-Session-ID` from the original transform. ≤128 chars.                        |
-| `fingerprint` | string  | no       | Match the server-derived `fingerprint` hash (§6). ≤128 chars. Useful for grouping CLI runs that have no `user_id`. |
 | `limit`       | integer | no       | 1..100, default **20**.                                                              |
 | `before`      | string  | no       | ISO-8601 timestamp. Returns runs strictly older than this — for paging.              |
 
-When multiple filters are present, results match **all** of them (intersection).
+When both filters are present, results match **both** (intersection).
 
 **Example — fetch all (default limit)**
 
@@ -501,8 +499,9 @@ curl "https://api.lsp.example.com/usage?user_id=user_2fK91ABc&limit=50&before=20
       "user_id": "user_2fK91ABc",
       "session_id": "sess_42",
       "client_request_id": "6f2c1f4e-9a55-4f7b-8a6d-2b1f5b9b3f2d",
-      "fingerprint": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
       "ip": "203.0.113.7",
+      "forwarded_for": "203.0.113.7, 76.76.21.21",
+      "real_ip": "203.0.113.7",
       "country": "IN",
       "region": "Maharashtra",
       "city": "Pune",
@@ -568,8 +567,9 @@ curl "https://api.lsp.example.com/usage?user_id=user_2fK91ABc&limit=50&before=20
       "user_id": "user_2fK91ABc",
       "session_id": "sess_42",
       "client_request_id": null,
-      "fingerprint": "44b2f4ee6f5d2e8c39a54a8f6b1d7c2e9a8b3c4d5e6f7a8b9c0d1e2f3a4b5c6d",
       "ip": null,
+      "forwarded_for": null,
+      "real_ip": null,
       "country": null,
       "region": null,
       "city": null,
@@ -618,8 +618,9 @@ curl "https://api.lsp.example.com/usage?user_id=user_2fK91ABc&limit=50&before=20
 | `items[].user_id`      | string \| null      | Echo of the `X-User-ID` header sent on the original call. For CLI runs, taken from the `LSP_USER_ID` env var. |
 | `items[].session_id`   | string \| null      | Echo of `X-Session-ID`. For CLI runs, taken from `LSP_SESSION_ID`.                     |
 | `items[].client_request_id` | string \| null | Echo of `X-Client-Request-ID`. Always `null` for CLI runs.                              |
-| `items[].fingerprint`  | string \| null      | SHA-256 over `user_id + "\|" + user_agent`. Stable per (user-id, browser) pair; useful for grouping CLI runs that have no `user_id`. See §6. |
-| `items[].ip`           | string \| null      | Observed client IP (uvicorn proxy-headers settings determine whether this is the real IP or the reverse-proxy's). `null` for CLI runs. |
+| `items[].ip`           | string \| null      | Resolved client IP. Leftmost public IP from `X-Forwarded-For`, else `X-Real-IP`, else the socket peer. `null` for CLI runs. |
+| `items[].forwarded_for`| string \| null      | Raw `X-Forwarded-For` chain as it arrived at the API, verbatim. Use this to diagnose when `ip` looks wrong — see §6. |
+| `items[].real_ip`      | string \| null      | Raw `X-Real-IP` header as it arrived. Same diagnostic purpose as `forwarded_for`.       |
 | `items[].country` / `region` / `city` | string \| null | GeoIP lookup of `ip`. Coarse — country is reliable, city is best-effort. `null` for CLI runs. |
 | `items[].user_agent`   | string \| null      | Verbatim `User-Agent` header. `null` for CLI runs.                                     |
 | `items[].filename`     | string \| null      | Original file basename when provided. For HTTP, comes from the `filename` request field; for CLI, set automatically from the input path. |
@@ -690,8 +691,9 @@ curl https://api.lsp.example.com/usage/5f3a9e1b-7d2c-4a18-9f4b-c1e2d3a4b5c6
   "user_id": "user_2fK91ABc",
   "session_id": "sess_42",
   "client_request_id": "6f2c1f4e-9a55-4f7b-8a6d-2b1f5b9b3f2d",
-  "fingerprint": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
   "ip": "203.0.113.7",
+  "forwarded_for": "203.0.113.7, 76.76.21.21",
+  "real_ip": "203.0.113.7",
   "country": "IN",
   "region": "Maharashtra",
   "city": "Pune",
@@ -900,7 +902,6 @@ The API does not authenticate callers but **does record who ran each transform**
 | `user_id`                                   | `X-User-ID` header           | Group requests by end user                       |
 | `session_id`                                | `X-Session-ID` header        | Group requests within a single session           |
 | `client_request_id`                         | `X-Client-Request-ID` header | Correlate one client action with the server log  |
-| `fingerprint`                               | server-derived (see below)   | Weak correlator when `user_id` is missing        |
 | `request_id`                                | server-generated             | Canonical id for this request                    |
 | `style`                                     | request body                 | Which style was requested                        |
 | `content_size`                              | derived                      | Bytes of input LaTeX                             |
@@ -909,17 +910,26 @@ The API does not authenticate callers but **does record who ran each transform**
 | `ip`, `country`, `region`, `city`           | observed + geo lookup        | Coarse origin for support and abuse triage       |
 | `timestamp`                                 | server clock                 | When the request was processed                   |
 
-`/usage` returns most of the audit record — claimed identity, server-derived `fingerprint`, IP + geo, user-agent, request shape, pipeline counters, token/cost telemetry, and the GridFS artifact pointers + SHA-256 hashes. Only the request-content hash and a couple of routing fields stay private. Because the API has **no auth**, anyone who knows a `user_id` can read these — see §3.
+`/usage` returns most of the audit record — claimed identity, resolved IP + raw forwarded headers + geo, user-agent, request shape, pipeline counters, token/cost telemetry, and the GridFS artifact pointers + SHA-256 hashes. Only the request-content hash and a couple of routing fields stay private. Because the API has **no auth**, anyone who knows a `user_id` can read these — see §3.
 
-### `fingerprint`
+### How the IP is resolved (and how to diagnose when geo looks wrong)
 
-A SHA-256 hash the server computes per request:
+The server records three IP-related fields per run:
 
-```
-fingerprint = sha256(f"{user_id or ''}|{user_agent or ''}")
-```
+| Field          | What it is                                                                              |
+| -------------- | --------------------------------------------------------------------------------------- |
+| `ip`           | Resolved client IP. Leftmost public IP from `X-Forwarded-For`, else `X-Real-IP`, else the socket peer. This drives the geo lookup. |
+| `forwarded_for`| Raw `X-Forwarded-For` chain verbatim as it arrived at the API.                          |
+| `real_ip`      | Raw `X-Real-IP` header verbatim as it arrived.                                          |
 
-It's a weak correlator — changes when the user switches browsers or `user_id` is wiped, and matches across any two requests with the same `user_id` + `user-agent`. Useful for grouping CLI runs (no `user_id`) or older browsers without `localStorage`. Filter via `GET /usage?fingerprint=<hash>`.
+If `country`/`city` look wrong, look at `forwarded_for` and `real_ip` to pinpoint the bad hop:
+
+- `forwarded_for` is `null` and `real_ip` is `null` → no proxy is forwarding headers. The frontend / proxy in front of the API needs to set them, or you need to deploy uvicorn behind one that does.
+- `forwarded_for` is just the proxy's own IP (e.g. only a Vercel egress address) → the upstream is sending its own IP instead of the original client. Fix the proxy code to forward the inbound `X-Forwarded-For` it received.
+- `forwarded_for` contains the real client IP but `ip` doesn't match → the resolved IP picked a later hop. Usually means the leftmost address wasn't a routable public IP; verify the chain is well-formed.
+- `forwarded_for` looks right and `ip` matches but geo is empty → geocoder lookup failed for that IP; harmless, retry later or check the geocoder package.
+
+When deploying behind a reverse proxy you control (Cloudflare, ALB, Nginx), make sure it sets `X-Forwarded-For` with the real client IP as the leftmost value.
 
 ### Picking `X-User-ID`
 
@@ -948,7 +958,7 @@ A per-call opaque id, typically `crypto.randomUUID()` at the call site. Echoed i
 | Build / runtime   | `GET /version`                      | Models, limits, auth posture — for "About" panels    |
 | Style catalogue   | `GET /styles`                       | Always fetch, never hardcode                         |
 | Run a transform   | `POST /transform`                   | JSON by default; `Accept: text/plain` or `?format=tex` returns a raw `.tex` body. Send `X-User-ID` for tracking. Pass `filename` to preserve the original basename in history. |
-| Usage history     | `GET /usage`                        | Filterless = all runs; filter by `user_id`, `session_id`, and/or `fingerprint`; page via `before` |
+| Usage history     | `GET /usage`                        | Filterless = all runs; filter by `user_id` and/or `session_id`; page via `before` |
 | Single run lookup | `GET /usage/{request_id}`           | Sanitised summary of one past run                    |
 | Re-download input | `GET /usage/{request_id}/input.tex` | Stream the original `.tex` from GridFS               |
 | Re-download output| `GET /usage/{request_id}/output.tex`| Stream the transformed `.tex` from GridFS            |

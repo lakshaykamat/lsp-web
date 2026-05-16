@@ -218,11 +218,14 @@ function DetailView({ item }: { item: UsageItem }) {
         <Row label="client_request_id">
           <Mono>{item.client_request_id ?? "—"}</Mono>
         </Row>
-        <Row label="fingerprint">
-          <Mono truncate>{item.fingerprint ?? "—"}</Mono>
-        </Row>
-        <Row label="IP">
+        <Row label="IP (resolved)">
           <Mono>{item.ip ?? "—"}</Mono>
+        </Row>
+        <Row label="X-Forwarded-For">
+          <Mono truncate>{item.forwarded_for ?? "—"}</Mono>
+        </Row>
+        <Row label="X-Real-IP">
+          <Mono>{item.real_ip ?? "—"}</Mono>
         </Row>
         <Row label="Geo">
           {[item.city, item.region, item.country].filter(Boolean).join(", ") ||
