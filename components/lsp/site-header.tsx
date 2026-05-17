@@ -66,6 +66,12 @@ export function SiteHeader() {
         <NavLink href="/history" active={pathname?.startsWith("/history")}>
           History
         </NavLink>
+        <NavLink
+          href="/dashboard"
+          active={pathname?.startsWith("/dashboard")}
+        >
+          Dashboard
+        </NavLink>
         <span className="bg-border/60 mx-2 h-4 w-px" aria-hidden />
         <ThemeToggle />
       </div>
