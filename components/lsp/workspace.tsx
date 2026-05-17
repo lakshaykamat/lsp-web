@@ -18,7 +18,6 @@ import { Button } from "@/components/ui/button"
 import { DiffView } from "@/components/lsp/diff-view"
 import { SiteHeader } from "@/components/lsp/site-header"
 import { countEdits, parseDiff } from "@/lib/parse-diff"
-import { getSessionId, getUserId } from "@/lib/identity"
 import {
   type Style,
   type TransformError,
@@ -115,18 +114,9 @@ export function Workspace() {
     setElapsed(0)
     setPhase("process")
     try {
-      const userId = getUserId()
-      const sessionId = getSessionId()
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        "X-Client-Request-ID": crypto.randomUUID(),
-      }
-      if (userId) headers["X-User-ID"] = userId
-      if (sessionId) headers["X-Session-ID"] = sessionId
-
       const res = await fetch("/api/transform", {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           content: file.content,
           style: styleKey,

@@ -20,7 +20,6 @@ export type TransformMeta = {
   elapsed_ms: number
   request_id: string
   version: string
-  client_request_id: string | null
   artifact_id: string | null
 }
 
@@ -39,6 +38,7 @@ export type TransformError = {
 }
 
 export type UsageArtifacts = {
+  id: string | null
   input_file_id: string | null
   output_file_id: string | null
   log_file_id: string | null
@@ -63,9 +63,6 @@ export type UsageItem = {
   status_code: number
   duration_ms: number
   error_code: string | null
-  user_id: string | null
-  session_id: string | null
-  client_request_id: string | null
   ip: string | null
   forwarded_for: string | null
   real_ip: string | null
@@ -73,6 +70,9 @@ export type UsageItem = {
   region: string | null
   city: string | null
   user_agent: string | null
+  origin: string | null
+  referer: string | null
+  host: string | null
   filename: string | null
   style_requested: string | null
   style_resolved: string | null

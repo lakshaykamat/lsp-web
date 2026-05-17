@@ -21,7 +21,7 @@
    - [GET /usage/{request_id}/output.tex](#48-get-usagerequest_idoutputtex)
    - [GET /usage/{request_id}/log.txt](#49-get-usagerequest_idlogtxt)
 5. [Error model](#5-error-model)
-6. [Identifying users](#6-identifying-users)
+6. [Identifying calls](#6-identifying-calls)
 7. [Quick reference](#7-quick-reference)
 
 ---
@@ -70,22 +70,25 @@ Surface progress in the UI (skeleton, "still working…" copy). Don't leave a fr
 
 ## 3. Authentication & rate limiting
 
-> ⚠️ **There is no authentication on this API.** No bearer tokens, no API keys, no signed requests. Anyone who can reach the URL can call any endpoint, including `/usage`.
+The API is **open** — no authentication. Every endpoint is reachable without credentials, and there are no `Authorization` headers, API keys, or session cookies in play. The server records what it can observe (IP, user-agent, forwarded headers, geo) but does not identify the caller.
 
-Operational guards:
+### Operational guards
 
 | Guard                  | Default          | How to change (env var)            |
 | ---------------------- | ---------------- | ---------------------------------- |
 | Per-IP rate limit      | 30 req/min on `/transform` | `LSP_RATE_LIMIT_PER_MIN` |
 | Request body cap       | 4 MiB            | (compile-time)                     |
-| CORS allowed origins   | `*`              | `LSP_API_ALLOWED_ORIGINS` (comma-separated) |
+| CORS allowed origins   | configured       | `LSP_API_ALLOWED_ORIGINS` (comma-separated) |
 | Pipeline timeout       | 300 s            | (compile-time)                     |
 
-`X-User-ID` and `X-Session-ID` are **caller-asserted**. The server stores whatever the client sends and never verifies it. If you need verified identity, terminate auth in front of the API (Clerk, Auth0, NextAuth, an API gateway) and pass the verified user id through as `X-User-ID`.
+Rate limit is keyed on the resolved client IP (see §6). Callers behind shared NAT (offices, mobile carriers, CGNAT) share a quota.
 
-`/usage` accepts but does not enforce a `user_id` filter — anyone can list anyone's runs (or all runs). Treat run summaries as low-confidentiality.
+### Error responses
 
-When the rate limit trips, the response is `429 rate_limited` with a `Retry-After: <seconds>` header.
+| Status | `error`         | When                                                              |
+| ------ | --------------- | ----------------------------------------------------------------- |
+| 404    | `not_found`     | The `request_id` doesn't exist in the audit store.                |
+| 429    | `rate_limited`  | Per-IP quota exceeded. Response carries `Retry-After: <seconds>`. |
 
 ---
 
@@ -272,9 +275,6 @@ Run the pipeline. Synchronous: the response returns when the transform finishes 
 | --------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Content-Type`        | yes      | `application/json`                                                                                                                          |
 | `Accept`              | no       | Selects the response mode. Default JSON. Send `text/plain` (or `text/x-tex` / `application/x-tex`) to get the raw `.tex` body. See below.   |
-| `X-User-ID`           | no       | Stable opaque id for the end user. ≤128 chars. See §6.                                                                                      |
-| `X-Session-ID`        | no       | Per-session id (browser tab / login session). ≤128 chars.                                                                                   |
-| `X-Client-Request-ID` | no       | Tracing hint. Echoed in `meta.client_request_id` (JSON) or `X-Client-Request-ID` response header (plain). ≤128 chars.                       |
 
 **Request body**
 
@@ -290,9 +290,6 @@ Run the pipeline. Synchronous: the response returns when the transform finishes 
 ```bash
 curl -X POST https://api.lsp.example.com/transform \
   -H "Content-Type: application/json" \
-  -H "X-User-ID: user_2fK91ABc" \
-  -H "X-Session-ID: sess_42" \
-  -H "X-Client-Request-ID: 6f2c1f4e-9a55-4f7b-8a6d-2b1f5b9b3f2d" \
   -d '{
     "content": "\\section{Introduction}\nWe build on \\cite{smith2020}. See Fig. 1.",
     "style": "numbered",
@@ -346,7 +343,6 @@ curl -X POST https://api.lsp.example.com/transform \
     "elapsed_ms": 12480,
     "request_id": "5f3a9e1b-7d2c-4a18-9f4b-c1e2d3a4b5c6",
     "version": "5.0.0",
-    "client_request_id": "6f2c1f4e-9a55-4f7b-8a6d-2b1f5b9b3f2d",
     "artifact_id": "65f1c2a3b4d5e6f7a8b9c0d1"
   }
 }
@@ -374,7 +370,6 @@ curl -X POST https://api.lsp.example.com/transform \
 | `meta.elapsed_ms`           | integer            | End-to-end server time (incl. I/O, sinks).                                             |
 | `meta.request_id`           | string (UUID v4)   | Canonical id. Also in `X-Request-ID` header.                                           |
 | `meta.version`              | string             | Server version that handled this request.                                              |
-| `meta.client_request_id`    | string \| null     | Echo of `X-Client-Request-ID`.                                                         |
 | `meta.artifact_id`          | string \| null     | GridFS id of the stored input artifact, when audit storage is healthy.                 |
 
 **Response — 200 (`text/plain`, file mode)**
@@ -387,7 +382,6 @@ The response body is the **raw `.tex` content** — no JSON wrapper. All telemet
 curl -X POST "https://api.lsp.example.com/transform" \
   -H "Content-Type: application/json" \
   -H "Accept: text/plain" \
-  -H "X-User-ID: user_2fK91ABc" \
   -d '{ "content": "\\section{Introduction}\n...", "style": "numbered" }' \
   -o transformed.tex
 
@@ -414,7 +408,6 @@ X-LSP-Tokens-Cached: 256
 X-LSP-Cost-USD: 0.082300
 X-LSP-Cost-INR: 7.4070
 X-LSP-Artifact-ID: 65f1c2a3b4d5e6f7a8b9c0d1
-X-Client-Request-ID: 6f2c1f4e-9a55-4f7b-8a6d-2b1f5b9b3f2d
 
 \section{\del{Introduction}\ins{INTRODUCTION}}
 We build on \del{\cite}\ins{\citep}{smith2020}. See \del{Fig.}\ins{Figure} 1.
@@ -433,7 +426,6 @@ We build on \del{\cite}\ins{\citep}{smith2020}. See \del{Fig.}\ins{Figure} 1.
 | `X-LSP-Cost-USD`      | Cost in USD, 6 decimal places.                                                     |
 | `X-LSP-Cost-INR`      | Cost in INR, 4 decimal places.                                                     |
 | `X-LSP-Artifact-ID`   | GridFS id of the stored input artifact, when present.                              |
-| `X-Client-Request-ID` | Echoed only when the caller sent it on the request.                                |
 
 **Notes**
 
@@ -445,41 +437,29 @@ We build on \del{\cite}\ins{\citep}{smith2020}. See \del{Fig.}\ins{Figure} 1.
 
 ### 4.5 `GET /usage`
 
-Read the audit history of past `/transform` runs. Returns a sanitised projection — claimed identity, resolved IP + raw forwarded headers + geo, user-agent, request shape, pipeline counters, token/cost telemetry, and GridFS artifact pointers. Only the raw content SHA stays server-side.
+Read the audit history of past `/transform` runs. Returns a sanitised projection: resolved IP + raw forwarded headers + geo, user-agent, request shape, pipeline counters, token/cost telemetry, and GridFS artifact pointers. Only the raw content SHA stays server-side.
 
-All filters are optional. Call shapes:
-
-| Goal                              | Query string                                |
-| --------------------------------- | ------------------------------------------- |
-| List all runs (most recent first) | *(none)*                                    |
-| One user's history                | `?user_id=user_2fK91ABc`                    |
-| One session's history             | `?session_id=sess_42`                       |
-| Combine filters (intersection)    | `?user_id=user_2fK91ABc&session_id=sess_42` |
-| Page through results              | append `&before=<ts_utc-from-prev-page>`    |
+Newest first; page with `limit` + `before`.
 
 **Query parameters**
 
 | Name          | Type    | Required | Notes                                                                                |
 | ------------- | ------- | -------- | ------------------------------------------------------------------------------------ |
-| `user_id`     | string  | no       | Match `X-User-ID` from the original transform. ≤128 chars.                           |
-| `session_id`  | string  | no       | Match `X-Session-ID` from the original transform. ≤128 chars.                        |
 | `limit`       | integer | no       | 1..100, default **20**.                                                              |
 | `before`      | string  | no       | ISO-8601 timestamp. Returns runs strictly older than this — for paging.              |
 
-When both filters are present, results match **both** (intersection).
-
-**Example — fetch all (default limit)**
+**Example — fetch recent runs**
 
 ```bash
 curl https://api.lsp.example.com/usage
 ```
 
-**Example — filter by user, paged**
+**Example — paged**
 
 ```bash
-curl "https://api.lsp.example.com/usage?user_id=user_2fK91ABc&limit=50"
+curl "https://api.lsp.example.com/usage?limit=50"
 # next page:
-curl "https://api.lsp.example.com/usage?user_id=user_2fK91ABc&limit=50&before=2026-05-07T14:08:11.412Z"
+curl "https://api.lsp.example.com/usage?limit=50&before=2026-05-07T14:08:11.412Z"
 ```
 
 **Response — 200**
@@ -496,9 +476,6 @@ curl "https://api.lsp.example.com/usage?user_id=user_2fK91ABc&limit=50&before=20
       "status_code": 200,
       "duration_ms": 12480,
       "error_code": null,
-      "user_id": "user_2fK91ABc",
-      "session_id": "sess_42",
-      "client_request_id": "6f2c1f4e-9a55-4f7b-8a6d-2b1f5b9b3f2d",
       "ip": "203.0.113.7",
       "forwarded_for": "203.0.113.7, 76.76.21.21",
       "real_ip": "203.0.113.7",
@@ -506,6 +483,9 @@ curl "https://api.lsp.example.com/usage?user_id=user_2fK91ABc&limit=50&before=20
       "region": "Maharashtra",
       "city": "Pune",
       "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+      "origin": "https://app.lsp.example.com",
+      "referer": "https://app.lsp.example.com/manuscripts/TRE13243",
+      "host": "api.lsp.example.com",
       "filename": "TRE13243.tex",
       "style_requested": "numbered",
       "style_resolved": "numbered",
@@ -540,6 +520,7 @@ curl "https://api.lsp.example.com/usage?user_id=user_2fK91ABc&limit=50&before=20
         "cost_inr": 7.41
       },
       "artifacts": {
+        "id": "5f3a9e1b-7d2c-4a18-9f4b-c1e2d3a4b5c6",
         "input_file_id": "65f1c2a3b4d5e6f7a8b9c0d1",
         "output_file_id": "65f1c2a3b4d5e6f7a8b9c0d2",
         "log_file_id": "65f1c2a3b4d5e6f7a8b9c0d3",
@@ -564,9 +545,6 @@ curl "https://api.lsp.example.com/usage?user_id=user_2fK91ABc&limit=50&before=20
       "status_code": 408,
       "duration_ms": 300010,
       "error_code": "request_timeout",
-      "user_id": "user_2fK91ABc",
-      "session_id": "sess_42",
-      "client_request_id": null,
       "ip": null,
       "forwarded_for": null,
       "real_ip": null,
@@ -574,6 +552,9 @@ curl "https://api.lsp.example.com/usage?user_id=user_2fK91ABc&limit=50&before=20
       "region": null,
       "city": null,
       "user_agent": null,
+      "origin": null,
+      "referer": null,
+      "host": null,
       "filename": "BigManuscript.tex",
       "style_requested": "vancouver",
       "style_resolved": "vancouver",
@@ -584,6 +565,7 @@ curl "https://api.lsp.example.com/usage?user_id=user_2fK91ABc&limit=50&before=20
       "pipeline_detail": null,
       "usage": null,
       "artifacts": {
+        "id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
         "input_file_id": "65f0e1d2c3b4a5968778899a",
         "output_file_id": null,
         "log_file_id": "65f0e1d2c3b4a5968778899b",
@@ -615,14 +597,14 @@ curl "https://api.lsp.example.com/usage?user_id=user_2fK91ABc&limit=50&before=20
 | `items[].status_code`  | integer             | HTTP status the original `/transform` returned. CLI runs use `200` for success / `500` for failure. |
 | `items[].duration_ms`  | integer             | Server-side end-to-end duration.                                                       |
 | `items[].error_code`   | string \| null      | Set on non-2xx (e.g. `"request_timeout"`, `"pipeline_failed"`).                        |
-| `items[].user_id`      | string \| null      | Echo of the `X-User-ID` header sent on the original call. For CLI runs, taken from the `LSP_USER_ID` env var. |
-| `items[].session_id`   | string \| null      | Echo of `X-Session-ID`. For CLI runs, taken from `LSP_SESSION_ID`.                     |
-| `items[].client_request_id` | string \| null | Echo of `X-Client-Request-ID`. Always `null` for CLI runs.                              |
 | `items[].ip`           | string \| null      | Resolved client IP. Leftmost public IP from `X-Forwarded-For`, else `X-Real-IP`, else the socket peer. `null` for CLI runs. |
 | `items[].forwarded_for`| string \| null      | Raw `X-Forwarded-For` chain as it arrived at the API, verbatim. Use this to diagnose when `ip` looks wrong — see §6. |
 | `items[].real_ip`      | string \| null      | Raw `X-Real-IP` header as it arrived. Same diagnostic purpose as `forwarded_for`.       |
 | `items[].country` / `region` / `city` | string \| null | GeoIP lookup of `ip`. Coarse — country is reliable, city is best-effort. `null` for CLI runs. |
 | `items[].user_agent`   | string \| null      | Verbatim `User-Agent` header. `null` for CLI runs.                                     |
+| `items[].origin`       | string \| null      | Verbatim `Origin` request header — the scheme + host of the calling page (set by browsers on cross-origin requests). Useful to confirm which frontend triggered the call. `null` for direct API / CLI hits. |
+| `items[].referer`      | string \| null      | Verbatim `Referer` header — the full URL of the page that triggered the request. `null` for direct API / CLI hits. |
+| `items[].host`         | string \| null      | Verbatim `Host` header the request was addressed to (e.g. `api.lsp.example.com`). Useful when one server fronts multiple hostnames. `null` for CLI runs. |
 | `items[].filename`     | string \| null      | Original file basename when provided. For HTTP, comes from the `filename` request field; for CLI, set automatically from the input path. |
 | `items[].style_requested` | string \| null   | Raw value from the request body (could be a shortcut).                                 |
 | `items[].style_resolved` | string \| null    | Canonical style key.                                                                   |
@@ -639,6 +621,7 @@ curl "https://api.lsp.example.com/usage?user_id=user_2fK91ABc&limit=50&before=20
 
 | Field            | Type            | Notes                                                                                   |
 | ---------------- | --------------- | --------------------------------------------------------------------------------------- |
+| `id`             | string \| null  | Same value as the parent `request_id`. Carried here so a frontend that hands the artifacts sub-object to a downloader doesn't need the surrounding record.  |
 | `input_file_id`  | string \| null  | GridFS file id of the original input. `null` if the input write failed.                 |
 | `output_file_id` | string \| null  | GridFS file id of the transformed output. `null` if the request errored before output.  |
 | `log_file_id`    | string \| null  | GridFS file id of the captured run log. `null` if no log was written.                   |
@@ -655,20 +638,19 @@ curl "https://api.lsp.example.com/usage?user_id=user_2fK91ABc&limit=50&before=20
 
 The `input_url` / `output_url` / `log_url` values are paths only (e.g. `/usage/<request_id>/input.tex`) — prefix them with the API base URL to fetch. See §§4.7–4.9.
 
-> ⚠️ Artifact download endpoints are **unauthenticated** — same posture as the rest of `/usage` (§3). Any caller who can read `/usage` can re-download every artifact. Put auth in front of the API if that's not acceptable.
+> Artifact download endpoints (§§4.7–4.9) are open in the same way as `/usage`; a missing `request_id` returns `404 not_found`.
 
 **Notes**
 
 - Most-recent-first ordering by `ts_utc`.
 - `usage` is `null` when the original request errored before billing was finalised.
-- `client_request_id`, `ip`, `country`, `region`, `city`, `user_agent` are `null` when the original request didn't carry that information (or geo lookup was unavailable).
-- The audit endpoint is **unauthenticated** (§3). Anyone with a `user_id` can read its IPs, geo, and artifact ids. Treat this surface accordingly.
+- `ip`, `country`, `region`, `city`, `user_agent` are `null` when the original request didn't carry that information (or geo lookup was unavailable, or it was a CLI run).
 
 ---
 
 ### 4.6 `GET /usage/{request_id}`
 
-Look up a single past run by its `request_id`. The id comes from `meta.request_id` in the original `/transform` response or the `X-Request-ID` response header.
+Look up a single past run by its `request_id`. The id comes from `meta.request_id` in the original `/transform` response or the `X-Request-ID` response header. Returns `404 not_found` if the record doesn't exist.
 
 **Request**
 
@@ -682,15 +664,13 @@ curl https://api.lsp.example.com/usage/5f3a9e1b-7d2c-4a18-9f4b-c1e2d3a4b5c6
 {
   "request_id": "5f3a9e1b-7d2c-4a18-9f4b-c1e2d3a4b5c6",
   "ts_utc": "2026-05-07T14:08:11.412Z",
+
   "source": "http",
   "version": "5.0.0",
   "git_sha": "abc1234",
   "status_code": 200,
   "duration_ms": 12480,
   "error_code": null,
-  "user_id": "user_2fK91ABc",
-  "session_id": "sess_42",
-  "client_request_id": "6f2c1f4e-9a55-4f7b-8a6d-2b1f5b9b3f2d",
   "ip": "203.0.113.7",
   "forwarded_for": "203.0.113.7, 76.76.21.21",
   "real_ip": "203.0.113.7",
@@ -698,6 +678,9 @@ curl https://api.lsp.example.com/usage/5f3a9e1b-7d2c-4a18-9f4b-c1e2d3a4b5c6
   "region": "Maharashtra",
   "city": "Pune",
   "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+  "origin": "https://app.lsp.example.com",
+  "referer": "https://app.lsp.example.com/manuscripts/TRE13243",
+  "host": "api.lsp.example.com",
   "filename": "TRE13243.tex",
   "style_requested": "numbered",
   "style_resolved": "numbered",
@@ -733,6 +716,7 @@ curl https://api.lsp.example.com/usage/5f3a9e1b-7d2c-4a18-9f4b-c1e2d3a4b5c6
     "cost_inr": 7.41
   },
   "artifacts": {
+    "id": "5f3a9e1b-7d2c-4a18-9f4b-c1e2d3a4b5c6",
     "input_file_id": "65f1c2a3b4d5e6f7a8b9c0d1",
     "output_file_id": "65f1c2a3b4d5e6f7a8b9c0d2",
     "log_file_id": "65f1c2a3b4d5e6f7a8b9c0d3",
@@ -792,9 +776,9 @@ We build on \cite{smith2020}. See Fig. 1.
 
 **Errors**
 
-| Status | `error`     | When                                                                                       |
-| ------ | ----------- | ------------------------------------------------------------------------------------------ |
-| 404    | `not_found` | Unknown `request_id`, or input was never written (artifact sink failed during the run).    |
+| Status | `error`        | When                                                                              |
+| ------ | -------------- | --------------------------------------------------------------------------------- |
+| 404    | `not_found`    | Unknown `request_id`, or input was never written.                                 |
 
 ---
 
@@ -813,9 +797,9 @@ curl -OJ https://api.lsp.example.com/usage/5f3a9e1b-7d2c-4a18-9f4b-c1e2d3a4b5c6/
 
 **Errors**
 
-| Status | `error`     | When                                                                                        |
-| ------ | ----------- | ------------------------------------------------------------------------------------------- |
-| 404    | `not_found` | Unknown `request_id`, or the run errored before output was written (`output_file_id` null). |
+| Status | `error`        | When                                                                              |
+| ------ | -------------- | --------------------------------------------------------------------------------- |
+| 404    | `not_found`    | Unknown `request_id`, or the run errored before output was written.               |
 
 ---
 
@@ -834,9 +818,9 @@ curl -OJ https://api.lsp.example.com/usage/5f3a9e1b-7d2c-4a18-9f4b-c1e2d3a4b5c6/
 
 **Errors**
 
-| Status | `error`     | When                                                                                    |
-| ------ | ----------- | --------------------------------------------------------------------------------------- |
-| 404    | `not_found` | Unknown `request_id`, or no log was captured for the run (`log_file_id` null).          |
+| Status | `error`        | When                                                                              |
+| ------ | -------------- | --------------------------------------------------------------------------------- |
+| 404    | `not_found`    | Unknown `request_id`, or no log was captured for the run.                         |
 
 ---
 
@@ -859,7 +843,7 @@ Every non-2xx response uses the same envelope:
 | 408    | `request_timeout`     | `/transform` exceeded the 300 s budget.                                                                | Retry with smaller content, or accept loss.       |
 | 413    | `payload_too_large`   | Request body > 4 MiB.                                                                                  | Reject on the client before posting.              |
 | 422    | `validation_error`    | Body schema rejection — missing field, wrong type, header > 128 chars, `only_command_keys` over limits, bad `before`/`limit` on `/usage`. | Fix the request shape.    |
-| 429    | `rate_limited`        | Per-IP quota exceeded on `/transform`.                                                                 | Honour `Retry-After` header (seconds).            |
+| 429    | `rate_limited`        | Per-IP quota exceeded on `/transform`. See §3.                                                         | Honour `Retry-After` header (seconds).            |
 | 503    | `pipeline_failed`     | Pipeline raised mid-run.                                                                               | Retry once, then fail.                            |
 | 503    | `service_unavailable` | Mongo or another dependency is down (also `/usage` when the audit store is unreachable).               | Surface as transient; retry with backoff.         |
 
@@ -891,17 +875,14 @@ Content-Type: application/json
 
 ---
 
-## 6. Identifying users
+## 6. Identifying calls
 
-The API does not authenticate callers but **does record who ran each transform**. That powers per-user history (`/usage`), support investigations ("which of my users hit this error?"), and usage dashboards.
+The API has no authenticated principal — there are no `X-User-ID` / `X-Session-ID` style headers, and any such header sent by a caller would be ignored. The server records only what it can observe itself (IP, forwarded headers, geo, user-agent, `Origin` / `Referer` / `Host`).
 
 ### What the server records per `/transform`
 
 | Field                                       | Source                       | Purpose                                          |
 | ------------------------------------------- | ---------------------------- | ------------------------------------------------ |
-| `user_id`                                   | `X-User-ID` header           | Group requests by end user                       |
-| `session_id`                                | `X-Session-ID` header        | Group requests within a single session           |
-| `client_request_id`                         | `X-Client-Request-ID` header | Correlate one client action with the server log  |
 | `request_id`                                | server-generated             | Canonical id for this request                    |
 | `style`                                     | request body                 | Which style was requested                        |
 | `content_size`                              | derived                      | Bytes of input LaTeX                             |
@@ -910,7 +891,7 @@ The API does not authenticate callers but **does record who ran each transform**
 | `ip`, `country`, `region`, `city`           | observed + geo lookup        | Coarse origin for support and abuse triage       |
 | `timestamp`                                 | server clock                 | When the request was processed                   |
 
-`/usage` returns most of the audit record — claimed identity, resolved IP + raw forwarded headers + geo, user-agent, request shape, pipeline counters, token/cost telemetry, and the GridFS artifact pointers + SHA-256 hashes. Only the request-content hash and a couple of routing fields stay private. Because the API has **no auth**, anyone who knows a `user_id` can read these — see §3.
+`/usage` returns the full audit history — resolved IP + raw forwarded headers + geo, user-agent, request shape, pipeline counters, token/cost telemetry, and the GridFS artifact pointers + SHA-256 hashes. Only the request-content hash stays server-side.
 
 ### How the IP is resolved (and how to diagnose when geo looks wrong)
 
@@ -931,23 +912,6 @@ If `country`/`city` look wrong, look at `forwarded_for` and `real_ip` to pinpoin
 
 When deploying behind a reverse proxy you control (Cloudflare, ALB, Nginx), make sure it sets `X-Forwarded-For` with the real client IP as the leftmost value.
 
-### Picking `X-User-ID`
-
-- Opaque to LSP — any string ≤128 chars.
-- Stable across network changes. Don't derive it from IP — IPs change on Wi-Fi/mobile/VPN switches and the user will look like a stranger every time.
-- Recommended sources, in order of preference:
-  1. The user id from your auth provider (Clerk's `user.id`, Auth0 `sub`, NextAuth user id).
-  2. A UUID minted on first visit and persisted (server-side cookie or `localStorage`).
-- **Never send raw email addresses, full names, or other PII** — `X-User-ID` shows up in logs and audit records. Send a stable id; resolve the human name in the frontend.
-
-### Picking `X-Session-ID`
-
-A per-session opaque id (login session, browser tab session — whatever is meaningful to your UI). Useful for grouping the four transforms a user ran during one editing sitting. Same ≤128 char / no-PII rule.
-
-### Picking `X-Client-Request-ID`
-
-A per-call opaque id, typically `crypto.randomUUID()` at the call site. Echoed in `meta.client_request_id`. Use it to thread a single user-visible action through your client logs and the server's audit log.
-
 ---
 
 ## 7. Quick reference
@@ -957,11 +921,11 @@ A per-call opaque id, typically `crypto.randomUUID()` at the call site. Echoed i
 | Health check      | `GET /healthz`                      | Liveness                                             |
 | Build / runtime   | `GET /version`                      | Models, limits, auth posture — for "About" panels    |
 | Style catalogue   | `GET /styles`                       | Always fetch, never hardcode                         |
-| Run a transform   | `POST /transform`                   | JSON by default; `Accept: text/plain` or `?format=tex` returns a raw `.tex` body. Send `X-User-ID` for tracking. Pass `filename` to preserve the original basename in history. |
-| Usage history     | `GET /usage`                        | Filterless = all runs; filter by `user_id` and/or `session_id`; page via `before` |
-| Single run lookup | `GET /usage/{request_id}`           | Sanitised summary of one past run                    |
+| Run a transform   | `POST /transform`                   | JSON by default; `Accept: text/plain` or `?format=tex` returns a raw `.tex` body. Pass `filename` to preserve the original basename in history. |
+| Usage history     | `GET /usage`                        | All runs, newest first; page via `limit` + `before`  |
+| Single run lookup | `GET /usage/{request_id}`           | 404 when the id is unknown                           |
 | Re-download input | `GET /usage/{request_id}/input.tex` | Stream the original `.tex` from GridFS               |
-| Re-download output| `GET /usage/{request_id}/output.tex`| Stream the transformed `.tex` from GridFS            |
+| Re-download output| `GET /usage/{request_id}/output.tex`| Stream the transformed `.tex` from GridFS           |
 | Re-download log   | `GET /usage/{request_id}/log.txt`   | Stream the captured pipeline run log                 |
 | OpenAPI / Swagger | `GET /docs`                         | Live schema — keep this open while integrating       |
 

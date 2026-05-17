@@ -209,15 +209,6 @@ function DetailView({ item }: { item: UsageItem }) {
       )}
 
       <Section title="Caller">
-        <Row label="user_id">
-          <Mono>{item.user_id ?? "—"}</Mono>
-        </Row>
-        <Row label="session_id">
-          <Mono>{item.session_id ?? "—"}</Mono>
-        </Row>
-        <Row label="client_request_id">
-          <Mono>{item.client_request_id ?? "—"}</Mono>
-        </Row>
         <Row label="IP (resolved)">
           <Mono>{item.ip ?? "—"}</Mono>
         </Row>
@@ -230,6 +221,15 @@ function DetailView({ item }: { item: UsageItem }) {
         <Row label="Geo">
           {[item.city, item.region, item.country].filter(Boolean).join(", ") ||
             "—"}
+        </Row>
+        <Row label="Origin">
+          <Mono truncate>{item.origin ?? "—"}</Mono>
+        </Row>
+        <Row label="Referer">
+          <Mono truncate>{item.referer ?? "—"}</Mono>
+        </Row>
+        <Row label="Host">
+          <Mono>{item.host ?? "—"}</Mono>
         </Row>
         <Row label="User-Agent">
           <span className="text-muted-foreground block font-mono text-[11px] break-all">

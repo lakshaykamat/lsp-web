@@ -3,11 +3,10 @@
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { motion } from "framer-motion"
-import { ArrowRight, MagnifyingGlass, WarningCircle } from "@phosphor-icons/react"
+import { ArrowRight, WarningCircle } from "@phosphor-icons/react"
 
 import { SiteHeader } from "@/components/lsp/site-header"
 import { Button } from "@/components/ui/button"
-import { getUserId } from "@/lib/identity"
 import { cn } from "@/lib/utils"
 import type {
   TransformError,
@@ -16,8 +15,6 @@ import type {
 } from "@/lib/lsp-types"
 
 export default function HistoryPage() {
-  const [userId, setUserId] = useState("")
-  const [sessionId, setSessionId] = useState("")
   const [items, setItems] = useState<UsageItem[]>([])
   const [nextBefore, setNextBefore] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -31,8 +28,6 @@ export default function HistoryPage() {
       setError(null)
 
       const params = new URLSearchParams()
-      if (userId.trim()) params.set("user_id", userId.trim())
-      if (sessionId.trim()) params.set("session_id", sessionId.trim())
       params.set("limit", "20")
       if (opts.before) params.set("before", opts.before)
 
@@ -59,55 +54,12 @@ export default function HistoryPage() {
         setLoadingMore(false)
       }
     },
-    [userId, sessionId],
+    [],
   )
 
   useEffect(() => {
-    const ctrl = new AbortController()
-    const initialUserId = getUserId()
-    if (initialUserId) setUserId(initialUserId)
-    ;(async () => {
-      try {
-        const params = new URLSearchParams()
-        params.set("limit", "20")
-        if (initialUserId) params.set("user_id", initialUserId)
-        const res = await fetch(`/api/usage?${params}`, {
-          cache: "no-store",
-          signal: ctrl.signal,
-        })
-        const data = await res.json()
-        if (ctrl.signal.aborted) return
-        if (!res.ok) {
-          setError(data as TransformError)
-        } else {
-          const page = data as UsageListResponse
-          setItems(page.items)
-          setNextBefore(page.next_before)
-        }
-      } catch (err) {
-        if (ctrl.signal.aborted) return
-        setError({
-          error: "network_error",
-          detail: err instanceof Error ? err.message : "Network failure.",
-          request_id: "—",
-        })
-      } finally {
-        if (!ctrl.signal.aborted) setLoading(false)
-      }
-    })()
-    return () => ctrl.abort()
-  }, [])
-
-  function applyFilters(e: React.FormEvent) {
-    e.preventDefault()
     void fetchPage({ append: false })
-  }
-
-  function clearFilters() {
-    setUserId("")
-    setSessionId("")
-    setTimeout(() => void fetchPage({ append: false }), 0)
-  }
+  }, [fetchPage])
 
   return (
     <div className="bg-background flex min-h-svh flex-col">
@@ -124,38 +76,6 @@ export default function HistoryPage() {
             endpoint.
           </p>
         </div>
-
-        <form
-          onSubmit={applyFilters}
-          className="border-border bg-card mb-6 flex flex-wrap items-end gap-3 rounded-xl border p-4"
-        >
-          <FilterField
-            label="user_id"
-            value={userId}
-            onChange={setUserId}
-            placeholder="user_2fK91ABc"
-          />
-          <FilterField
-            label="session_id"
-            value={sessionId}
-            onChange={setSessionId}
-            placeholder="sess_42"
-          />
-          <div className="ml-auto flex items-center gap-2">
-            {(userId || sessionId) && (
-              <button
-                type="button"
-                onClick={clearFilters}
-                className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 transition hover:underline"
-              >
-                Clear
-              </button>
-            )}
-            <Button type="submit" size="sm" className="gap-1.5">
-              <MagnifyingGlass size={12} weight="bold" /> Apply
-            </Button>
-          </div>
-        </form>
 
         {error && <ErrorState error={error} />}
 
@@ -197,32 +117,6 @@ export default function HistoryPage() {
         )}
       </main>
     </div>
-  )
-}
-
-function FilterField({
-  label,
-  value,
-  onChange,
-  placeholder,
-}: {
-  label: string
-  value: string
-  onChange: (v: string) => void
-  placeholder: string
-}) {
-  return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
-        {label}
-      </span>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="border-border bg-background focus:border-foreground/40 h-8 w-48 rounded-md border px-2.5 font-mono text-xs outline-none transition"
-      />
-    </label>
   )
 }
 
@@ -305,7 +199,7 @@ function ErrorState({ error }: { error: TransformError }) {
 function EmptyState() {
   return (
     <div className="border-border bg-card flex flex-col items-center gap-2 rounded-xl border border-dashed p-10 text-center">
-      <p className="text-foreground text-sm">No runs match these filters.</p>
+      <p className="text-foreground text-sm">No runs yet.</p>
       <p className="text-muted-foreground text-xs">
         Run a transform from the home page, then return here.
       </p>

@@ -2,11 +2,10 @@ import { NextResponse } from "next/server"
 import crypto from "node:crypto"
 
 const FORWARD_HEADERS = [
-  "x-user-id",
-  "x-session-id",
-  "x-client-request-id",
   "user-agent",
   "accept",
+  "origin",
+  "referer",
   "x-forwarded-proto",
   "x-forwarded-host",
 ] as const
