@@ -51,7 +51,6 @@ export default function HistoryPage() {
   const [query, setQuery] = useState("")
   const [dateRange, setDateRange] = useState<DateRange>("all")
   const [status, setStatus] = useState<StatusFilter>("all")
-  const [style, setStyle] = useState<string>("all")
 
   const fetchPage = useCallback(
     async (opts: { before?: string; append: boolean }) => {
@@ -93,15 +92,6 @@ export default function HistoryPage() {
     void fetchPage({ append: false })
   }, [fetchPage])
 
-  const styleOptions = useMemo(() => {
-    const set = new Set<string>()
-    for (const it of items) {
-      const s = it.style_resolved ?? it.style_requested
-      if (s) set.add(s)
-    }
-    return Array.from(set).sort()
-  }, [items])
-
   const filtered = useMemo(() => {
     const cutoff =
       dateRange === "all" ? null : Date.now() - DATE_WINDOWS_MS[dateRange]
@@ -117,10 +107,6 @@ export default function HistoryPage() {
         if (status === "ok" && !ok) return false
         if (status === "error" && ok) return false
       }
-      if (style !== "all") {
-        const s = item.style_resolved ?? item.style_requested
-        if (s !== style) return false
-      }
       if (q) {
         const hay = `${item.filename ?? ""} ${item.request_id} ${
           item.error_code ?? ""
@@ -129,19 +115,15 @@ export default function HistoryPage() {
       }
       return true
     })
-  }, [items, dateRange, status, style, query])
+  }, [items, dateRange, status, query])
 
   const filtersActive =
-    query.trim().length > 0 ||
-    dateRange !== "all" ||
-    status !== "all" ||
-    style !== "all"
+    query.trim().length > 0 || dateRange !== "all" || status !== "all"
 
   const resetFilters = () => {
     setQuery("")
     setDateRange("all")
     setStatus("all")
-    setStyle("all")
   }
 
   return (
@@ -168,9 +150,6 @@ export default function HistoryPage() {
             onDateRangeChange={setDateRange}
             status={status}
             onStatusChange={setStatus}
-            style={style}
-            onStyleChange={setStyle}
-            styleOptions={styleOptions}
             filtersActive={filtersActive}
             onReset={resetFilters}
             visibleCount={filtered.length}
@@ -241,9 +220,6 @@ type FiltersProps = {
   onDateRangeChange: (v: DateRange) => void
   status: StatusFilter
   onStatusChange: (v: StatusFilter) => void
-  style: string
-  onStyleChange: (v: string) => void
-  styleOptions: string[]
   filtersActive: boolean
   onReset: () => void
   visibleCount: number
@@ -258,9 +234,6 @@ function Filters({
   onDateRangeChange,
   status,
   onStatusChange,
-  style,
-  onStyleChange,
-  styleOptions,
   filtersActive,
   onReset,
   visibleCount,
@@ -315,31 +288,6 @@ function Filters({
           onChange={onStatusChange}
           disabled={disabled}
         />
-        {styleOptions.length > 0 && (
-          <div className="flex items-center gap-2">
-            <span className="text-muted-foreground text-[10px] tracking-wider uppercase">
-              Style
-            </span>
-            <select
-              value={style}
-              onChange={(e) => onStyleChange(e.target.value)}
-              disabled={disabled}
-              className={cn(
-                "border-border bg-card text-foreground h-7 rounded-md border px-2 font-mono text-[11px] tracking-tight uppercase",
-                "focus:border-foreground/30 focus:outline-none",
-                "disabled:opacity-50",
-              )}
-            >
-              <option value="all">All</option>
-              {styleOptions.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
         <div className="text-muted-foreground ml-auto flex items-center gap-3 text-[11px] tabular-nums">
           {filtersActive && (
             <span>
@@ -459,14 +407,6 @@ function RunRow({ item }: { item: UsageItem }) {
       href={`/history/${item.request_id}`}
       className="hover:bg-muted/40 group flex items-center gap-4 px-4 py-3.5 transition-colors"
     >
-      <span
-        className={cn(
-          "h-1.5 w-1.5 shrink-0 rounded-full",
-          ok ? "bg-foreground" : "bg-foreground/30",
-        )}
-        aria-hidden
-      />
-
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex items-center gap-2">
           <span
@@ -475,17 +415,11 @@ function RunRow({ item }: { item: UsageItem }) {
           >
             {item.filename ?? "Untitled"}
           </span>
-          <span
-            className={cn(
-              "rounded-full px-1.5 py-0.5 font-mono text-[10px] tracking-tight",
-              ok
-                ? "text-muted-foreground border-border/80 border"
-                : "bg-foreground/10 text-foreground",
-            )}
-          >
-            {item.status_code}
-            {item.error_code ? ` · ${item.error_code}` : ""}
-          </span>
+          {!ok && (
+            <span className="bg-foreground/10 text-foreground rounded-full px-1.5 py-0.5 font-mono text-[10px] tracking-tight">
+              {item.error_code ?? `HTTP ${item.status_code}`}
+            </span>
+          )}
         </div>
         <div className="text-muted-foreground flex items-center gap-2 truncate font-mono text-[11px]">
           <span className="uppercase tracking-wider">
@@ -500,7 +434,7 @@ function RunRow({ item }: { item: UsageItem }) {
         <span>{formatRelative(item.ts_utc)}</span>
         <span>
           {(item.duration_ms / 1000).toFixed(1)}s
-          {item.usage ? ` · $${item.usage.cost_usd.toFixed(4)}` : ""}
+          {item.usage ? ` · ${formatInr(item.usage.cost_inr)}` : ""}
         </span>
       </div>
 
@@ -544,7 +478,6 @@ function ListSkeleton() {
     <ul className="border-border divide-border bg-card divide-y overflow-hidden rounded-xl border">
       {Array.from({ length: 5 }).map((_, i) => (
         <li key={i} className="flex items-center gap-4 px-4 py-4">
-          <span className="bg-muted/60 h-1.5 w-1.5 shrink-0 rounded-full" />
           <div className="flex min-w-0 flex-1 flex-col gap-2">
             <span className="bg-muted/60 h-3 w-32 rounded" />
             <span className="bg-muted/40 h-2.5 w-56 rounded" />
@@ -554,6 +487,13 @@ function ListSkeleton() {
       ))}
     </ul>
   )
+}
+
+function formatInr(value: number): string {
+  if (!Number.isFinite(value)) return "—"
+  return value < 1
+    ? `₹${value.toFixed(3)}`
+    : `₹${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`
 }
 
 function formatRelative(iso: string): string {

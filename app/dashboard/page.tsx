@@ -142,8 +142,8 @@ export default function DashboardPage() {
                 showCost
               />
               <BreakdownCard
-                title="By country"
-                rows={agg.byCountry}
+                title="Top files"
+                rows={agg.byFile}
                 showCost
               />
               <BreakdownCard
@@ -180,12 +180,11 @@ export default function DashboardPage() {
 type Row = {
   key: string
   count: number
-  cost_usd: number
+  cost_inr: number
 }
 
 type Aggregate = {
   totalRuns: number
-  totalCostUsd: number
   totalCostInr: number
   totalTokens: number
   totalCachedTokens: number
@@ -195,7 +194,7 @@ type Aggregate = {
   successCount: number
   errorCount: number
   byStyle: Row[]
-  byCountry: Row[]
+  byFile: Row[]
   byModel: Row[]
   byOrigin: Row[]
   errors: Row[]
@@ -204,7 +203,6 @@ type Aggregate = {
 }
 
 function aggregate(items: UsageItem[]): Aggregate {
-  let totalCostUsd = 0
   let totalCostInr = 0
   let totalTokens = 0
   let totalCachedTokens = 0
@@ -215,7 +213,7 @@ function aggregate(items: UsageItem[]): Aggregate {
   let errorCount = 0
 
   const style = new Map<string, Row>()
-  const country = new Map<string, Row>()
+  const file = new Map<string, Row>()
   const model = new Map<string, Row>()
   const origin = new Map<string, Row>()
   const errs = new Map<string, Row>()
@@ -229,16 +227,15 @@ function aggregate(items: UsageItem[]): Aggregate {
     const existing = bucket.get(k)
     if (existing) {
       existing.count += 1
-      existing.cost_usd += cost
+      existing.cost_inr += cost
     } else {
-      bucket.set(k, { key: k, count: 1, cost_usd: cost })
+      bucket.set(k, { key: k, count: 1, cost_inr: cost })
     }
   }
 
   for (const it of items) {
-    const cost = it.usage?.cost_usd ?? 0
-    totalCostUsd += cost
-    totalCostInr += it.usage?.cost_inr ?? 0
+    const cost = it.usage?.cost_inr ?? 0
+    totalCostInr += cost
     totalTokens += it.usage?.total_tokens ?? 0
     totalCachedTokens += it.usage?.cached_tokens ?? 0
     totalLlmTimeS += it.usage?.total_time_s ?? 0
@@ -250,7 +247,7 @@ function aggregate(items: UsageItem[]): Aggregate {
     else errorCount += 1
 
     bump(style, it.style_resolved ?? it.style_requested, cost)
-    bump(country, it.country, cost)
+    bump(file, it.filename, cost)
     bump(model, it.usage?.model, cost)
     bump(origin, originLabel(it.origin), cost)
     if (!ok && it.error_code) bump(errs, it.error_code, 0)
@@ -258,21 +255,20 @@ function aggregate(items: UsageItem[]): Aggregate {
 
   const sortRows = (m: Map<string, Row>, limit = 8): Row[] =>
     Array.from(m.values())
-      .sort((a, b) => b.count - a.count || b.cost_usd - a.cost_usd)
+      .sort((a, b) => b.count - a.count || b.cost_inr - a.cost_inr)
       .slice(0, limit)
 
   const days = buildDayBuckets(items, DAYS_WINDOW)
 
   const topByCost = [...items]
-    .filter((it) => (it.usage?.cost_usd ?? 0) > 0)
+    .filter((it) => (it.usage?.cost_inr ?? 0) > 0)
     .sort(
-      (a, b) => (b.usage?.cost_usd ?? 0) - (a.usage?.cost_usd ?? 0),
+      (a, b) => (b.usage?.cost_inr ?? 0) - (a.usage?.cost_inr ?? 0),
     )
     .slice(0, 6)
 
   return {
     totalRuns: items.length,
-    totalCostUsd,
     totalCostInr,
     totalTokens,
     totalCachedTokens,
@@ -282,7 +278,7 @@ function aggregate(items: UsageItem[]): Aggregate {
     successCount,
     errorCount,
     byStyle: sortRows(style),
-    byCountry: sortRows(country),
+    byFile: sortRows(file),
     byModel: sortRows(model),
     byOrigin: sortRows(origin),
     errors: sortRows(errs, 6),
@@ -350,8 +346,8 @@ function KpiGrid({ agg }: { agg: Aggregate }) {
       />
       <Kpi
         label="Total cost"
-        value={`$${agg.totalCostUsd.toFixed(2)}`}
-        sub={`₹${agg.totalCostInr.toFixed(2)}`}
+        value={formatInr(agg.totalCostInr)}
+        sub={`${agg.totalRuns.toLocaleString()} runs`}
       />
       <Kpi
         label="Total tokens"
@@ -492,7 +488,7 @@ function BreakdownCard({
                     <span>{r.count.toLocaleString()}</span>
                     {showCost && (
                       <span className="text-foreground/80">
-                        ${r.cost_usd.toFixed(2)}
+                        {formatInr(r.cost_inr)}
                       </span>
                     )}
                   </span>
@@ -548,7 +544,7 @@ function TopRuns({ rows }: { rows: UsageItem[] }) {
                 </div>
                 <div className="text-muted-foreground flex flex-col items-end font-mono text-[11px] tabular-nums">
                   <span className="text-foreground">
-                    ${it.usage?.cost_usd.toFixed(4) ?? "—"}
+                    {it.usage ? formatInr(it.usage.cost_inr) : "—"}
                   </span>
                   <span>
                     {(it.duration_ms / 1000).toFixed(1)}s ·{" "}
@@ -626,6 +622,14 @@ function Skeleton() {
 }
 
 /* ─── Formatters ──────────────────────────────────────────────── */
+
+function formatInr(value: number): string {
+  if (!Number.isFinite(value)) return "—"
+  if (value === 0) return "₹0"
+  return value < 1
+    ? `₹${value.toFixed(3)}`
+    : `₹${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`
+}
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
