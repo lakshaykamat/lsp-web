@@ -1,9 +1,14 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { motion } from "framer-motion"
-import { ArrowRight, WarningCircle } from "@phosphor-icons/react"
+import {
+  ArrowRight,
+  MagnifyingGlass,
+  WarningCircle,
+  X,
+} from "@phosphor-icons/react"
 
 import { SiteHeader } from "@/components/lsp/site-header"
 import { Button } from "@/components/ui/button"
@@ -14,12 +19,39 @@ import type {
   UsageListResponse,
 } from "@/lib/lsp-types"
 
+type DateRange = "all" | "24h" | "7d" | "30d"
+type StatusFilter = "all" | "ok" | "error"
+
+const DATE_OPTIONS: { value: DateRange; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "24h", label: "24h" },
+  { value: "7d", label: "7d" },
+  { value: "30d", label: "30d" },
+]
+
+const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "ok", label: "Success" },
+  { value: "error", label: "Error" },
+]
+
+const DATE_WINDOWS_MS: Record<Exclude<DateRange, "all">, number> = {
+  "24h": 24 * 60 * 60 * 1000,
+  "7d": 7 * 24 * 60 * 60 * 1000,
+  "30d": 30 * 24 * 60 * 60 * 1000,
+}
+
 export default function HistoryPage() {
   const [items, setItems] = useState<UsageItem[]>([])
   const [nextBefore, setNextBefore] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<TransformError | null>(null)
+
+  const [query, setQuery] = useState("")
+  const [dateRange, setDateRange] = useState<DateRange>("all")
+  const [status, setStatus] = useState<StatusFilter>("all")
+  const [style, setStyle] = useState<string>("all")
 
   const fetchPage = useCallback(
     async (opts: { before?: string; append: boolean }) => {
@@ -61,12 +93,63 @@ export default function HistoryPage() {
     void fetchPage({ append: false })
   }, [fetchPage])
 
+  const styleOptions = useMemo(() => {
+    const set = new Set<string>()
+    for (const it of items) {
+      const s = it.style_resolved ?? it.style_requested
+      if (s) set.add(s)
+    }
+    return Array.from(set).sort()
+  }, [items])
+
+  const filtered = useMemo(() => {
+    const cutoff =
+      dateRange === "all" ? null : Date.now() - DATE_WINDOWS_MS[dateRange]
+    const q = query.trim().toLowerCase()
+
+    return items.filter((item) => {
+      if (cutoff !== null) {
+        const t = new Date(item.ts_utc).getTime()
+        if (!Number.isFinite(t) || t < cutoff) return false
+      }
+      if (status !== "all") {
+        const ok = item.status_code >= 200 && item.status_code < 300
+        if (status === "ok" && !ok) return false
+        if (status === "error" && ok) return false
+      }
+      if (style !== "all") {
+        const s = item.style_resolved ?? item.style_requested
+        if (s !== style) return false
+      }
+      if (q) {
+        const hay = `${item.filename ?? ""} ${item.request_id} ${
+          item.error_code ?? ""
+        }`.toLowerCase()
+        if (!hay.includes(q)) return false
+      }
+      return true
+    })
+  }, [items, dateRange, status, style, query])
+
+  const filtersActive =
+    query.trim().length > 0 ||
+    dateRange !== "all" ||
+    status !== "all" ||
+    style !== "all"
+
+  const resetFilters = () => {
+    setQuery("")
+    setDateRange("all")
+    setStatus("all")
+    setStyle("all")
+  }
+
   return (
     <div className="bg-background flex min-h-svh flex-col">
       <SiteHeader />
 
       <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-10 sm:px-8">
-        <div className="mb-8 flex flex-col gap-1.5">
+        <div className="mb-6 flex flex-col gap-1.5">
           <h1 className="text-foreground text-lg font-medium tracking-tight">
             Usage history
           </h1>
@@ -77,16 +160,47 @@ export default function HistoryPage() {
           </p>
         </div>
 
+        {!error && (
+          <Filters
+            query={query}
+            onQueryChange={setQuery}
+            dateRange={dateRange}
+            onDateRangeChange={setDateRange}
+            status={status}
+            onStatusChange={setStatus}
+            style={style}
+            onStyleChange={setStyle}
+            styleOptions={styleOptions}
+            filtersActive={filtersActive}
+            onReset={resetFilters}
+            visibleCount={filtered.length}
+            totalCount={items.length}
+            disabled={loading && items.length === 0}
+          />
+        )}
+
         {error && <ErrorState error={error} />}
 
         {!error && loading && <ListSkeleton />}
 
         {!error && !loading && items.length === 0 && <EmptyState />}
 
-        {!error && !loading && items.length > 0 && (
+        {!error && !loading && items.length > 0 && filtered.length === 0 && (
+          <NoMatchesState
+            onReset={resetFilters}
+            hasMore={Boolean(nextBefore)}
+            loadingMore={loadingMore}
+            onLoadMore={() =>
+              nextBefore &&
+              void fetchPage({ before: nextBefore, append: true })
+            }
+          />
+        )}
+
+        {!error && !loading && filtered.length > 0 && (
           <>
             <ul className="border-border divide-border bg-card divide-y overflow-hidden rounded-xl border">
-              {items.map((item, i) => (
+              {filtered.map((item, i) => (
                 <motion.li
                   key={item.request_id}
                   initial={{ opacity: 0, y: 4 }}
@@ -116,6 +230,224 @@ export default function HistoryPage() {
           </>
         )}
       </main>
+    </div>
+  )
+}
+
+type FiltersProps = {
+  query: string
+  onQueryChange: (v: string) => void
+  dateRange: DateRange
+  onDateRangeChange: (v: DateRange) => void
+  status: StatusFilter
+  onStatusChange: (v: StatusFilter) => void
+  style: string
+  onStyleChange: (v: string) => void
+  styleOptions: string[]
+  filtersActive: boolean
+  onReset: () => void
+  visibleCount: number
+  totalCount: number
+  disabled: boolean
+}
+
+function Filters({
+  query,
+  onQueryChange,
+  dateRange,
+  onDateRangeChange,
+  status,
+  onStatusChange,
+  style,
+  onStyleChange,
+  styleOptions,
+  filtersActive,
+  onReset,
+  visibleCount,
+  totalCount,
+  disabled,
+}: FiltersProps) {
+  return (
+    <div className="mb-4 flex flex-col gap-3">
+      <div className="relative">
+        <MagnifyingGlass
+          size={14}
+          weight="bold"
+          className="text-muted-foreground/60 pointer-events-none absolute top-1/2 left-3 -translate-y-1/2"
+        />
+        <input
+          type="text"
+          inputMode="search"
+          placeholder="Filter by filename, request id, or error code"
+          value={query}
+          onChange={(e) => onQueryChange(e.target.value)}
+          disabled={disabled}
+          className={cn(
+            "border-border bg-card text-foreground placeholder:text-muted-foreground/60 h-9 w-full rounded-lg border pr-9 pl-8 text-xs",
+            "focus:border-foreground/30 focus:outline-none",
+            "disabled:opacity-50",
+          )}
+        />
+        {query && (
+          <button
+            type="button"
+            onClick={() => onQueryChange("")}
+            className="text-muted-foreground/60 hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2 rounded p-1 transition"
+            aria-label="Clear search"
+          >
+            <X size={12} weight="bold" />
+          </button>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <SegmentedControl
+          label="Date"
+          value={dateRange}
+          options={DATE_OPTIONS}
+          onChange={onDateRangeChange}
+          disabled={disabled}
+        />
+        <SegmentedControl
+          label="Status"
+          value={status}
+          options={STATUS_OPTIONS}
+          onChange={onStatusChange}
+          disabled={disabled}
+        />
+        {styleOptions.length > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground text-[10px] tracking-wider uppercase">
+              Style
+            </span>
+            <select
+              value={style}
+              onChange={(e) => onStyleChange(e.target.value)}
+              disabled={disabled}
+              className={cn(
+                "border-border bg-card text-foreground h-7 rounded-md border px-2 font-mono text-[11px] tracking-tight uppercase",
+                "focus:border-foreground/30 focus:outline-none",
+                "disabled:opacity-50",
+              )}
+            >
+              <option value="all">All</option>
+              {styleOptions.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        <div className="text-muted-foreground ml-auto flex items-center gap-3 text-[11px] tabular-nums">
+          {filtersActive && (
+            <span>
+              {visibleCount} of {totalCount}
+            </span>
+          )}
+          {filtersActive && (
+            <button
+              type="button"
+              onClick={onReset}
+              className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-[11px] transition"
+            >
+              <X size={11} weight="bold" /> Reset
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+type SegmentOption<T extends string> = { value: T; label: string }
+
+function SegmentedControl<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+  disabled,
+}: {
+  label: string
+  value: T
+  options: SegmentOption<T>[]
+  onChange: (v: T) => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-muted-foreground text-[10px] tracking-wider uppercase">
+        {label}
+      </span>
+      <div
+        className={cn(
+          "border-border bg-card inline-flex h-7 items-center rounded-md border p-0.5",
+          disabled && "opacity-50",
+        )}
+        role="group"
+        aria-label={label}
+      >
+        {options.map((opt) => {
+          const active = opt.value === value
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => onChange(opt.value)}
+              disabled={disabled}
+              className={cn(
+                "h-6 rounded px-2 text-[11px] font-medium transition",
+                active
+                  ? "bg-foreground text-background"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              aria-pressed={active}
+            >
+              {opt.label}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function NoMatchesState({
+  onReset,
+  hasMore,
+  loadingMore,
+  onLoadMore,
+}: {
+  onReset: () => void
+  hasMore: boolean
+  loadingMore: boolean
+  onLoadMore: () => void
+}) {
+  return (
+    <div className="border-border bg-card flex flex-col items-center gap-3 rounded-xl border border-dashed p-10 text-center">
+      <p className="text-foreground text-sm">No runs match these filters.</p>
+      <p className="text-muted-foreground text-xs">
+        {hasMore
+          ? "Older runs may match — load more or reset filters."
+          : "Try a broader date range or clear the search."}
+      </p>
+      <div className="mt-1 flex gap-2">
+        <Button variant="ghost" size="sm" onClick={onReset}>
+          Reset filters
+        </Button>
+        {hasMore && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onLoadMore}
+            disabled={loadingMore}
+          >
+            {loadingMore ? "Loading…" : "Load older"}
+          </Button>
+        )}
+      </div>
     </div>
   )
 }
