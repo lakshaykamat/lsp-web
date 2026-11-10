@@ -22,11 +22,16 @@ function encodeBase64Url(bytes: Uint8Array): string {
     .replace(/=+$/g, "")
 }
 
-function decodeBase64Url(value: string): Uint8Array {
+function decodeBase64Url(value: string): ArrayBuffer {
   const base64 = value.replace(/-/g, "+").replace(/_/g, "/")
   const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4)
   const binary = atob(padded)
-  return Uint8Array.from(binary, (char) => char.charCodeAt(0))
+  const bytes = new ArrayBuffer(binary.length)
+  const view = new Uint8Array(bytes)
+  for (let index = 0; index < binary.length; index += 1) {
+    view[index] = binary.charCodeAt(index)
+  }
+  return bytes
 }
 
 export async function createAuthSession(password: string): Promise<string> {
