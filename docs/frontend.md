@@ -239,9 +239,10 @@ For a request with `user_id: null` (CLI runs, older browser without
 ## 8. Things the frontend deliberately does **not** send
 
 - **Email / name / any PII** — `X-User-ID` is a UUID, never a human name.
-- **Auth tokens** — there is no auth layer between our web client and the LSP
-  API today. If you add one, we'll wire it up; the proxy already passes
-  through arbitrary headers configured in `FORWARD_HEADERS`.
+- **Auth tokens** — the browser never receives the shared LSP API token. The
+  Next.js proxy adds `Authorization: Bearer <LSP_API_TOKEN>` server-side for
+  every API request. Keep `LSP_API_TOKEN` out of browser bundles and client
+  storage.
 - **Cookies** — none crossing the boundary today.
 - **`X-Real-IP` from the browser** — only Vercel's edge-injected value, never
   user-supplied.

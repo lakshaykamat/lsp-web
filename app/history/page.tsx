@@ -137,8 +137,8 @@ export default function HistoryPage() {
           </h1>
           <p className="text-muted-foreground text-xs">
             Past <code className="font-mono">/transform</code> runs from the
-            backend audit log. No authentication is required to read this
-            endpoint.
+            backend audit log. The server connects to the API with its
+            configured bearer token.
           </p>
         </div>
 

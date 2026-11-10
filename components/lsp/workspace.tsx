@@ -27,12 +27,14 @@ import { cn } from "@/lib/utils"
 
 const ERROR_HINTS: Record<string, string> = {
   invalid_style: "The selected style isn't in the catalogue.",
+  unauthorized: "The server's LSP API token was rejected.",
   request_timeout: "Pipeline exceeded the 300 s budget.",
   payload_too_large: "Body over 4 MiB.",
   validation_error: "Request shape rejected.",
   rate_limited: "Quota exceeded — honour Retry-After.",
   pipeline_failed: "Pipeline raised mid-run.",
-  service_unavailable: "Backend dependency down.",
+  service_unavailable:
+    "Backend service or API credentials are not configured.",
   network_error: "Network failure.",
 }
 
@@ -54,6 +56,7 @@ const fade = {
 export function Workspace() {
   const [phase, setPhase] = useState<Phase>("upload")
   const [styles, setStyles] = useState<Style[] | null>(null)
+  const [styleError, setStyleError] = useState<string | null>(null)
   const [styleKey, setStyleKey] = useState<string>("")
   const [file, setFile] = useState<Loaded | null>(null)
   const [fileError, setFileError] = useState<string | null>(null)
@@ -68,14 +71,31 @@ export function Workspace() {
   useEffect(() => {
     let cancelled = false
     fetch("/api/styles")
-      .then((r) => r.json())
+      .then(async (r) => {
+        const data = await r.json()
+        if (!r.ok) {
+          throw new Error(data.detail ?? "Unable to load citation styles.")
+        }
+        if (!Array.isArray(data)) {
+          throw new Error("The API returned an invalid styles response.")
+        }
+        return data as Style[]
+      })
       .then((data: Style[]) => {
         if (cancelled) return
         setStyles(data)
+        setStyleError(null)
         if (data[0]) setStyleKey((k) => k || data[0].key)
       })
-      .catch(() => {
-        if (!cancelled) setStyles([])
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setStyles([])
+          setStyleError(
+            err instanceof Error
+              ? err.message
+              : "Unable to load citation styles.",
+          )
+        }
       })
     return () => {
       cancelled = true
@@ -171,6 +191,7 @@ export function Workspace() {
             <motion.div key="style" {...fade} className="w-full max-w-md">
               <StyleStep
                 styles={styles}
+                error={styleError}
                 value={styleKey}
                 onChange={setStyleKey}
                 onBack={() => setPhase("upload")}
@@ -376,12 +397,14 @@ function UploadStep({
 
 function StyleStep({
   styles,
+  error,
   value,
   onChange,
   onBack,
   onRun,
 }: {
   styles: Style[] | null
+  error: string | null
   value: string
   onChange: (k: string) => void
   onBack: () => void
@@ -406,42 +429,50 @@ function StyleStep({
         </div>
       </div>
 
-      <div className="border-border divide-border divide-y overflow-hidden rounded-xl border">
-        {styles.map((s, i) => {
-          const selected = s.key === value
-          return (
-            <motion.button
-              key={s.key}
-              type="button"
-              onClick={() => onChange(s.key)}
-              initial={{ opacity: 0, x: -6 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.3, delay: i * 0.04 }}
-              className={cn(
-                "group relative flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors",
-                selected ? "bg-muted/60" : "hover:bg-muted/40",
-              )}
-            >
-              <span
+      {styles.length === 0 ? (
+        <div className="border-border bg-card text-muted-foreground rounded-xl border p-5 text-center text-xs">
+          {error ?? "No citation styles are currently available."}
+        </div>
+      ) : (
+        <div className="border-border divide-border divide-y overflow-hidden rounded-xl border">
+          {styles.map((s, i) => {
+            const selected = s.key === value
+            return (
+              <motion.button
+                key={s.key}
+                type="button"
+                onClick={() => onChange(s.key)}
+                initial={{ opacity: 0, x: -6 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.3, delay: i * 0.04 }}
                 className={cn(
-                  "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition",
-                  selected
-                    ? "border-foreground bg-foreground text-background"
-                    : "border-border",
+                  "group relative flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors",
+                  selected ? "bg-muted/60" : "hover:bg-muted/40",
                 )}
               >
-                {selected && <Check size={9} weight="bold" />}
-              </span>
-              <div className="flex min-w-0 flex-1 items-center gap-2">
-                <span className="text-sm font-medium">{s.name}</span>
-                <span className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
-                  /{s.shortcut}
+                <span
+                  className={cn(
+                    "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition",
+                    selected
+                      ? "border-foreground bg-foreground text-background"
+                      : "border-border",
+                  )}
+                >
+                  {selected && <Check size={9} weight="bold" />}
                 </span>
-              </div>
-            </motion.button>
-          )
-        })}
-      </div>
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <span className="text-sm font-medium">{s.name}</span>
+                  {s.shortcut && (
+                    <span className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
+                      /{s.shortcut}
+                    </span>
+                  )}
+                </div>
+              </motion.button>
+            )
+          })}
+        </div>
+      )}
 
       <div className="flex items-center justify-between">
         <Button

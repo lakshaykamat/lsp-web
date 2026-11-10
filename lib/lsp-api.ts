@@ -87,10 +87,24 @@ export async function proxy(
   const base = apiBase()
   if (!base) return notConfigured()
 
+  const token = process.env.LSP_API_TOKEN
+  if (!token) {
+    return NextResponse.json(
+      {
+        error: "service_unavailable",
+        detail:
+          "LSP_API_TOKEN is not configured on the server. See .env.example.",
+        request_id: crypto.randomUUID(),
+      },
+      { status: 503 },
+    )
+  }
+
   const qs = init?.query?.toString()
   const url = `${base}${path}${qs ? `?${qs}` : ""}`
   const method = init?.method ?? "GET"
   const headers = pickHeaders(req, {
+    authorization: `Bearer ${token}`,
     ...(init?.body ? { "content-type": "application/json" } : {}),
   })
 

@@ -1,8 +1,8 @@
 export type Style = {
   key: string
   name: string
-  description: string
-  shortcut: string
+  description: string | null
+  shortcut: string | null
 }
 
 export type TransformUsage = {

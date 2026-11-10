@@ -20,6 +20,7 @@
    - [GET /usage/{request_id}/input.tex](#47-get-usagerequest_idinputtex)
    - [GET /usage/{request_id}/output.tex](#48-get-usagerequest_idoutputtex)
    - [GET /usage/{request_id}/log.txt](#49-get-usagerequest_idlogtxt)
+   - [GET /openai/stats](#410-get-openai-stats)
 5. [Error model](#5-error-model)
 6. [Identifying calls](#6-identifying-calls)
 7. [Quick reference](#7-quick-reference)
@@ -70,7 +71,7 @@ Surface progress in the UI (skeleton, "still working…" copy). Don't leave a fr
 
 ## 3. Authentication & rate limiting
 
-The API is **open** — no authentication. Every endpoint is reachable without credentials, and there are no `Authorization` headers, API keys, or session cookies in play. The server records what it can observe (IP, user-agent, forwarded headers, geo) but does not identify the caller.
+Every API endpoint requires the same shared bearer token configured as `LSP_API_TOKEN`. Generate a long random token, set it on the server and trusted caller, then send it in the `Authorization` header. The API does not identify individual users. Keep the token in a trusted backend; browser JavaScript cannot keep a shared secret private. Swagger documentation routes remain available without the API token. `LSP_API_ALLOWED_ORIGINS` must contain explicit browser origins; CORS does not block Postman or other non-browser clients, which still need the bearer token.
 
 ### Operational guards
 
@@ -78,8 +79,10 @@ The API is **open** — no authentication. Every endpoint is reachable without c
 | ---------------------- | ---------------- | ---------------------------------- |
 | Per-IP rate limit      | 30 req/min on `/transform` | `LSP_RATE_LIMIT_PER_MIN` |
 | Request body cap       | 4 MiB            | (compile-time)                     |
-| CORS allowed origins   | configured       | `LSP_API_ALLOWED_ORIGINS` (comma-separated) |
+| CORS allowed origins   | Required, explicit origins only | `LSP_API_ALLOWED_ORIGINS` |
 | Pipeline timeout       | 300 s            | (compile-time)                     |
+| Bearer authentication | Required for all API routes | `LSP_API_TOKEN`                 |
+| OpenAI stats reporting | Disabled until configured | `OPENAI_ADMIN_KEY`             |
 
 Rate limit is keyed on the resolved client IP (see §6). Callers behind shared NAT (offices, mobile carriers, CGNAT) share a quota.
 
@@ -87,6 +90,7 @@ Rate limit is keyed on the resolved client IP (see §6). Callers behind shared N
 
 | Status | `error`         | When                                                              |
 | ------ | --------------- | ----------------------------------------------------------------- |
+| 401    | `unauthorized`  | A route received a missing or incorrect bearer token.              |
 | 404    | `not_found`     | The `request_id` doesn't exist in the audit store.                |
 | 429    | `rate_limited`  | Per-IP quota exceeded. Response carries `Retry-After: <seconds>`. |
 
@@ -96,17 +100,19 @@ Rate limit is keyed on the resolved client IP (see §6). Callers behind shared N
 
 ### 4.1 `GET /healthz`
 
-Liveness probe. Cheap, unauthenticated, safe to hit from any monitoring system.
+Liveness probe. Include the bearer token when calling it from a monitoring system.
 
 **Request**
 
 ```http
 GET /healthz HTTP/1.1
 Host: api.lsp.example.com
+Authorization: Bearer YOUR_LSP_API_TOKEN
 ```
 
 ```bash
-curl https://api.lsp.example.com/healthz
+curl https://api.lsp.example.com/healthz \
+  -H 'Authorization: Bearer YOUR_LSP_API_TOKEN'
 ```
 
 **Response — 200**
@@ -134,7 +140,8 @@ Detailed build and runtime information. Use it for an "About" panel, debug overl
 **Request**
 
 ```bash
-curl https://api.lsp.example.com/version
+curl https://api.lsp.example.com/version \
+  -H 'Authorization: Bearer YOUR_LSP_API_TOKEN'
 ```
 
 **Response — 200**
@@ -165,10 +172,22 @@ curl https://api.lsp.example.com/version
     "rate_limit_per_min": 30
   },
   "auth": {
-    "enabled": false,
-    "scheme": null,
+    "enabled": true,
+    "scheme": "bearer",
+    "protected_routes": [
+      "/healthz",
+      "/styles",
+      "/version",
+      "/transform",
+      "/usage",
+      "/usage/{request_id}",
+      "/usage/{request_id}/input.tex",
+      "/usage/{request_id}/output.tex",
+      "/usage/{request_id}/log.txt",
+      "/openai/stats"
+    ],
     "rate_limit": "per_ip",
-    "cors_open": true
+    "cors_open": false
   }
 }
 ```
@@ -189,10 +208,11 @@ curl https://api.lsp.example.com/version
 | `limits.max_body_bytes`        | integer         | Server-enforced cap on request body bytes.                                 |
 | `limits.transform_timeout_s`   | number          | Hard ceiling on `/transform` runtime.                                      |
 | `limits.rate_limit_per_min`    | integer         | Per-IP request budget for `/transform`.                                    |
-| `auth.enabled`                 | boolean         | Currently always `false`. See §3.                                          |
-| `auth.scheme`                  | string \| null  | Currently always `null`.                                                   |
+| `auth.enabled`                 | boolean         | `true`; all API routes require the shared bearer token. See §3.              |
+| `auth.scheme`                  | string \| null  | `"bearer"`.                                                                |
+| `auth.protected_routes`        | string[]        | API routes that require `LSP_API_TOKEN`.                                   |
 | `auth.rate_limit`              | string          | `"per_ip"` today.                                                          |
-| `auth.cors_open`               | boolean         | `true` when `LSP_API_ALLOWED_ORIGINS` is `*`.                              |
+| `auth.cors_open`               | boolean         | Always `false`; wildcard origins are rejected at startup.                   |
 
 ---
 
@@ -203,7 +223,8 @@ Returns the catalogue of supported citation styles. **Always fetch this — neve
 **Request**
 
 ```bash
-curl https://api.lsp.example.com/styles
+curl https://api.lsp.example.com/styles \
+  -H 'Authorization: Bearer YOUR_LSP_API_TOKEN'
 ```
 
 **Response — 200**
@@ -290,6 +311,7 @@ Run the pipeline. Synchronous: the response returns when the transform finishes 
 ```bash
 curl -X POST https://api.lsp.example.com/transform \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $LSP_API_TOKEN" \
   -d '{
     "content": "\\section{Introduction}\nWe build on \\cite{smith2020}. See Fig. 1.",
     "style": "numbered",
@@ -382,12 +404,14 @@ The response body is the **raw `.tex` content** — no JSON wrapper. All telemet
 curl -X POST "https://api.lsp.example.com/transform" \
   -H "Content-Type: application/json" \
   -H "Accept: text/plain" \
+  -H "Authorization: Bearer $LSP_API_TOKEN" \
   -d '{ "content": "\\section{Introduction}\n...", "style": "numbered" }' \
   -o transformed.tex
 
 # equivalent:
 curl -X POST "https://api.lsp.example.com/transform?format=tex" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $LSP_API_TOKEN" \
   -d '{ "content": "\\section{Introduction}\n...", "style": "numbered" }' \
   -o transformed.tex
 ```
@@ -451,15 +475,18 @@ Newest first; page with `limit` + `before`.
 **Example — fetch recent runs**
 
 ```bash
-curl https://api.lsp.example.com/usage
+curl https://api.lsp.example.com/usage \
+  -H "Authorization: Bearer $LSP_API_TOKEN"
 ```
 
 **Example — paged**
 
 ```bash
-curl "https://api.lsp.example.com/usage?limit=50"
+curl "https://api.lsp.example.com/usage?limit=50" \
+  -H "Authorization: Bearer $LSP_API_TOKEN"
 # next page:
-curl "https://api.lsp.example.com/usage?limit=50&before=2026-05-07T14:08:11.412Z"
+curl "https://api.lsp.example.com/usage?limit=50&before=2026-05-07T14:08:11.412Z" \
+  -H "Authorization: Bearer $LSP_API_TOKEN"
 ```
 
 **Response — 200**
@@ -638,7 +665,7 @@ curl "https://api.lsp.example.com/usage?limit=50&before=2026-05-07T14:08:11.412Z
 
 The `input_url` / `output_url` / `log_url` values are paths only (e.g. `/usage/<request_id>/input.tex`) — prefix them with the API base URL to fetch. See §§4.7–4.9.
 
-> Artifact download endpoints (§§4.7–4.9) are open in the same way as `/usage`; a missing `request_id` returns `404 not_found`.
+> Artifact download endpoints (§§4.7–4.9) require the same bearer token as `/usage`; a missing `request_id` returns `404 not_found`.
 
 **Notes**
 
@@ -655,7 +682,8 @@ Look up a single past run by its `request_id`. The id comes from `meta.request_i
 **Request**
 
 ```bash
-curl https://api.lsp.example.com/usage/5f3a9e1b-7d2c-4a18-9f4b-c1e2d3a4b5c6
+curl https://api.lsp.example.com/usage/5f3a9e1b-7d2c-4a18-9f4b-c1e2d3a4b5c6 \
+  -H "Authorization: Bearer $LSP_API_TOKEN"
 ```
 
 **Response — 200**
@@ -664,7 +692,6 @@ curl https://api.lsp.example.com/usage/5f3a9e1b-7d2c-4a18-9f4b-c1e2d3a4b5c6
 {
   "request_id": "5f3a9e1b-7d2c-4a18-9f4b-c1e2d3a4b5c6",
   "ts_utc": "2026-05-07T14:08:11.412Z",
-
   "source": "http",
   "version": "5.0.0",
   "git_sha": "abc1234",
@@ -753,7 +780,8 @@ Re-download the **original** `.tex` content the caller submitted to `/transform`
 **Request**
 
 ```bash
-curl -OJ https://api.lsp.example.com/usage/5f3a9e1b-7d2c-4a18-9f4b-c1e2d3a4b5c6/input.tex
+curl -OJ https://api.lsp.example.com/usage/5f3a9e1b-7d2c-4a18-9f4b-c1e2d3a4b5c6/input.tex \
+  -H "Authorization: Bearer $LSP_API_TOKEN"
 ```
 
 `-OJ` tells curl to honour `Content-Disposition`, so the file is saved as `TRE13243.tex` (or whatever filename was stored on the audit record) rather than `input.tex`.
@@ -787,7 +815,8 @@ We build on \cite{smith2020}. See Fig. 1.
 Re-download the **transformed** `.tex` produced by the pipeline — the full file with `\del{old}\ins{new}` markup, byte-identical to what `/transform` returned in `content`.
 
 ```bash
-curl -OJ https://api.lsp.example.com/usage/5f3a9e1b-7d2c-4a18-9f4b-c1e2d3a4b5c6/output.tex
+curl -OJ https://api.lsp.example.com/usage/5f3a9e1b-7d2c-4a18-9f4b-c1e2d3a4b5c6/output.tex \
+  -H "Authorization: Bearer $LSP_API_TOKEN"
 ```
 
 | Header                | Notes                                                                                          |
@@ -808,7 +837,8 @@ curl -OJ https://api.lsp.example.com/usage/5f3a9e1b-7d2c-4a18-9f4b-c1e2d3a4b5c6/
 Re-download the **run log** captured during the pipeline — every line emitted by the transformation steps for that request. Useful when investigating why a specific run produced surprising output. Plain text, UTF-8.
 
 ```bash
-curl -OJ https://api.lsp.example.com/usage/5f3a9e1b-7d2c-4a18-9f4b-c1e2d3a4b5c6/log.txt
+curl -OJ https://api.lsp.example.com/usage/5f3a9e1b-7d2c-4a18-9f4b-c1e2d3a4b5c6/log.txt \
+  -H "Authorization: Bearer $LSP_API_TOKEN"
 ```
 
 | Header                | Notes                                                                            |
@@ -821,6 +851,49 @@ curl -OJ https://api.lsp.example.com/usage/5f3a9e1b-7d2c-4a18-9f4b-c1e2d3a4b5c6/
 | Status | `error`        | When                                                                              |
 | ------ | -------------- | --------------------------------------------------------------------------------- |
 | 404    | `not_found`    | Unknown `request_id`, or no log was captured for the run.                         |
+
+---
+
+### 4.10 `GET /openai/stats`
+
+Returns the total reported OpenAI organization cost for the most recent number of days. This uses OpenAI's Admin API costs endpoint; it requires an `OPENAI_ADMIN_KEY` with organization usage access. The normal `OPENAI_KEY` used for model requests cannot access this report.
+
+This endpoint uses the same `Authorization: Bearer <LSP_API_TOKEN>` required by every API route. Set `OPENAI_ADMIN_KEY` on the server to enable the cost report. Do not put either secret in a browser or frontend bundle.
+
+The response contains only the period and total USD spend, with no daily, model, or token breakdown. It does not show remaining prepaid credit; check the [API billing overview](https://platform.openai.com/settings/organization/billing/overview) for credit balance.
+
+**Request**
+
+```bash
+curl 'https://api.lsp.example.com/openai/stats?days=30' \
+  -H 'Authorization: Bearer YOUR_LSP_API_TOKEN'
+```
+
+`days` is optional, defaults to 30, and accepts values from 1 to 180.
+
+**Response — 200**
+
+```json
+{
+  "source": "openai_organization",
+  "period": {
+    "start_time": "2026-10-10T14:37:00Z",
+    "end_time": "2026-11-09T14:37:00Z",
+    "days": 30
+  },
+  "total_spent_usd": 1.2345
+}
+```
+
+The total comes from OpenAI's organization cost report and can include charges from other projects or apps in the same organization. OpenAI reporting may update after a delay.
+
+**Errors**
+
+| Status | `error`               | When                                                                    |
+| ------ | --------------------- | ----------------------------------------------------------------------- |
+| 401    | `unauthorized`        | Bearer token missing or incorrect.                                     |
+| 422    | `validation_error`    | `days` is outside 1..180.                                               |
+| 503    | `service_unavailable` | Reporting is not configured, or OpenAI's reporting API is unavailable. |
 
 ---
 
@@ -840,12 +913,13 @@ Every non-2xx response uses the same envelope:
 | ------ | --------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------- |
 | 400    | `invalid_style`       | `style` is not a known key or shortcut.                                                                | Re-fetch `/styles`; surface a "pick another" UI.  |
 | 404    | `not_found`           | `/usage/{request_id}` for an unknown id.                                                               | Show a "no record" state.                         |
+| 401    | `unauthorized`        | Any API endpoint has a missing or incorrect bearer token.                                             | Send the configured `LSP_API_TOKEN`.              |
 | 408    | `request_timeout`     | `/transform` exceeded the 300 s budget.                                                                | Retry with smaller content, or accept loss.       |
 | 413    | `payload_too_large`   | Request body > 4 MiB.                                                                                  | Reject on the client before posting.              |
 | 422    | `validation_error`    | Body schema rejection — missing field, wrong type, header > 128 chars, `only_command_keys` over limits, bad `before`/`limit` on `/usage`. | Fix the request shape.    |
 | 429    | `rate_limited`        | Per-IP quota exceeded on `/transform`. See §3.                                                         | Honour `Retry-After` header (seconds).            |
 | 503    | `pipeline_failed`     | Pipeline raised mid-run.                                                                               | Retry once, then fail.                            |
-| 503    | `service_unavailable` | Mongo or another dependency is down (also `/usage` when the audit store is unreachable).               | Surface as transient; retry with backoff.         |
+| 503    | `service_unavailable` | A required secret is missing, Mongo is down, or OpenAI stats are unavailable. | Configure the server and retry. |
 
 Always log `request_id` on the client. It's the one shared correlator into the server's audit log and traces.
 
@@ -877,7 +951,7 @@ Content-Type: application/json
 
 ## 6. Identifying calls
 
-The API has no authenticated principal — there are no `X-User-ID` / `X-Session-ID` style headers, and any such header sent by a caller would be ignored. The server records only what it can observe itself (IP, forwarded headers, geo, user-agent, `Origin` / `Referer` / `Host`).
+The API uses one shared bearer token and does not identify individual users. `X-User-ID` / `X-Session-ID` headers are ignored. The server records what it can observe itself (IP, forwarded headers, geo, user-agent, `Origin` / `Referer` / `Host`).
 
 ### What the server records per `/transform`
 
@@ -923,9 +997,9 @@ When deploying behind a reverse proxy you control (Cloudflare, ALB, Nginx), make
 | Style catalogue   | `GET /styles`                       | Always fetch, never hardcode                         |
 | Run a transform   | `POST /transform`                   | JSON by default; `Accept: text/plain` or `?format=tex` returns a raw `.tex` body. Pass `filename` to preserve the original basename in history. |
 | Usage history     | `GET /usage`                        | All runs, newest first; page via `limit` + `before`  |
+| OpenAI spend      | `GET /openai/stats?days=30`         | Total organization spend; requires a bearer token and OpenAI Admin key |
 | Single run lookup | `GET /usage/{request_id}`           | 404 when the id is unknown                           |
 | Re-download input | `GET /usage/{request_id}/input.tex` | Stream the original `.tex` from GridFS               |
 | Re-download output| `GET /usage/{request_id}/output.tex`| Stream the transformed `.tex` from GridFS           |
 | Re-download log   | `GET /usage/{request_id}/log.txt`   | Stream the captured pipeline run log                 |
 | OpenAPI / Swagger | `GET /docs`                         | Live schema — keep this open while integrating       |
-
