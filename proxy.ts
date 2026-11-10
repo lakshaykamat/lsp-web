@@ -3,7 +3,7 @@ import { AUTH_COOKIE_NAME, verifyAuthSession } from "@/lib/auth"
 
 const DISABLED_PATH = "/contact-admin"
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
 
   if (process.env.IS_DISABLED === "true") {
